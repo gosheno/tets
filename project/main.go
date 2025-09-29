@@ -188,7 +188,7 @@ func main() {
 				bot.Send(&telebot.Chat{ID: id}, msg)
 				
 			}
-			time.Sleep(1 * time.Minute)
+			time.Sleep(1 * time.Hour)
 		}
 	}()
 
