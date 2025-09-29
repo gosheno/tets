@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"time"
 
+	"tg-getgems-bot/getgems"
+
 	"github.com/joho/godotenv"
 	"gopkg.in/telebot.v3"
 )
@@ -28,12 +30,12 @@ type ApiResponseGreen struct {
 }
 
 type AttrGreen struct {
-	FloorPrice        float64 `json:"floorPrice"`
-	FloorPriceNano    string  `json:"floorPriceNano"` // в JSON это строка
-	ItemsCount        int     `json:"itemsCount"`
-	TotalVolumeSold   string  `json:"totalVolumeSold"`
-	TotalVolumeSoldNano string `json:"totalVolumeSoldNano"`
-	Holders           int     `json:"holders"`
+	FloorPrice          float64 `json:"floorPrice"`
+	FloorPriceNano      string  `json:"floorPriceNano"` // в JSON это строка
+	ItemsCount          int     `json:"itemsCount"`
+	TotalVolumeSold     string  `json:"totalVolumeSold"`
+	TotalVolumeSoldNano string  `json:"totalVolumeSoldNano"`
+	Holders             int     `json:"holders"`
 }
 
 type Attribute struct {
@@ -85,15 +87,15 @@ func getMinPrice() (float64, []byte, error) {
 
 	// ищем model.reactor.minPrice
 	for _, attr := range data.Response.Attributes {
-			for _, v := range attr.Values {
-				if v.Value == "Reactor" {
-					price, err := strconv.ParseFloat(v.MinPrice, 64)
-					if err != nil {
-						return 0, bodyBytes, err
-					}
-					return price, bodyBytes, nil
+		for _, v := range attr.Values {
+			if v.Value == "Reactor" {
+				price, err := strconv.ParseFloat(v.MinPrice, 64)
+				if err != nil {
+					return 0, bodyBytes, err
 				}
+				return price, bodyBytes, nil
 			}
+		}
 	}
 	return 0, bodyBytes, fmt.Errorf("не найден model.reactor.MinPriceNano")
 }
@@ -134,6 +136,7 @@ func getMinPriceGreen() (float64, []byte, error) {
 	// ищем model.reactor.minPrice
 	return data.Response.FloorPrice, bodyBytes, nil
 }
+
 // ------------------ запуск бота ------------------
 
 func main() {
@@ -152,42 +155,40 @@ func main() {
 	}
 
 	chatID := os.Getenv("CHAT_ID")
-
+	// adminID := os.Getenv("ADMIN_ID")
 	// команда для проверки вручную
 	bot.Handle("/check", func(c telebot.Context) error {
-		price, _, err := getMinPrice()
-		priceg, _, err := getMinPriceGreen()
-		startprofit:= (price/1000 - 1.4)/1.4*100  
-		endprofit:= (price/1000 - priceg)/priceg*100
-		if err != nil {
-			c.Send("Ошибка: " + err.Error())
-		} else {
-			c.Send(fmt.Sprintf(
-				"цена минта: 1.4\nфлор на Heart Locket Reactor: %.4f\nфлор на кусочек: %.4f\n----------------\nпрофит по цене минта: %.2f%%\nпрофит по флору кусочков: %.2f%%",
-				 price, priceg, startprofit, endprofit))
-				
-		}
+		price, _, _ := getMinPrice()
+		priceg, _, _ := getMinPriceGreen()
+		startprofit := (price/1000 - 1.4) / 1.4 * 100
+		endprofit := (price/1000 - priceg) / priceg * 100
 
+		// Получаем среднюю цену всех NFT через функцию из getgems/meddian.go
+		avgPrice := getgems.GetAveragePrice()
+
+		c.Send(fmt.Sprintf(
+			"цена минта: 1.4\nфлор на Heart Locket Reactor: %.4f\nфлор на кусочек: %.4f\n----------------\nпрофит по цене минта: %.2f%%\nпрофит по флору кусочков: %.2f%%\nСредняя цена всех NFT: %.2f TON",
+			price, priceg, startprofit, endprofit, avgPrice))
 		return nil
 	})
 
-	// авто-проверка каждые 10 минут
+	// авто-проверка каждыq час
 	go func() {
 		for {
-			price, _, err := getMinPrice()
-			priceg, _, err := getMinPriceGreen()
-			startprofit:= (price/1000 - 1.4)/1.4*100  
-			endprofit:= (price/1000 - priceg)/priceg*100
-			if err != nil {
-				log.Println("Ошибка getMinPrice:", err)
-			} else {
-				msg := fmt.Sprintf("цена минта: 1.4\nфлор на Heart Locket Reactor: %.4f\nфлор на кусочек: %.4f\n----------------\nпрофит по цене минта: %.2f%%\nпрофит по флору кусочков: %.2f%%",
-				price, priceg, startprofit, endprofit)
-				
-				id := parseChatID(chatID)
-				bot.Send(&telebot.Chat{ID: id}, msg)
-				
-			}
+			price, _, _ := getMinPrice()
+			priceg, _, _ := getMinPriceGreen()
+			startprofit := (price/1000 - 1.4) / 1.4 * 100
+			endprofit := (price/1000 - priceg) / priceg * 100
+
+			// Получаем среднюю цену всех NFT через функцию из getgems/meddian.go
+			id := parseChatID(chatID)
+			// admin := parseChatID(adminID)
+			// bot.Send(&telebot.Chat{ID: admin}, "начался сбор средней цены")
+			avgPrice := getgems.GetAveragePrice()
+			avgprofit := (price/1000 - avgPrice) / avgPrice * 100
+			msg := fmt.Sprintf("цена минта: 1.4 TON\nфлор на Heart Locket Reactor: %.4f TON\nфлор на кусочек: %.4f TON\nСредняя цена всех кусочков: %.2f TON\n----------------\nпрофит по цене минта: %.2f%%\nпрофит по флору кусочков: %.2f%% \n средний профит сообщества: %.2f%%",
+				price, priceg, avgPrice, startprofit, endprofit, avgprofit)
+			bot.Send(&telebot.Chat{ID: id}, msg)
 			time.Sleep(1 * time.Hour)
 		}
 	}()
