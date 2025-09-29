@@ -11,5 +11,3 @@ services:
     command: go run main.go
     env_file:
       - .env
-    ports:
-      - "8080:8080"
