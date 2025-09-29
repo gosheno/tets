@@ -1,6 +1,6 @@
 module tg-getgems-bot
 
-go 1.24.0
+go 1.24
 
 require gopkg.in/telebot.v3 v3.3.8
 
