@@ -1,0 +1,15 @@
+# syntax=docker/dockerfile:1
+FROM golang:1.21
+
+WORKDIR /app
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+# Copy .env file if present
+COPY .env .env
+
+# Run the bot
+CMD ["go", "run", "main.go"]
