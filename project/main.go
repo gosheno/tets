@@ -186,7 +186,7 @@ func main() {
 			// bot.Send(&telebot.Chat{ID: admin}, "начался сбор средней цены")
 			avgPrice := getgems.GetAveragePrice()
 			avgprofit := (price/1000 - avgPrice) / avgPrice * 100
-			msg := fmt.Sprintf("цена минта: 1.4 TON\nфлор на Heart Locket Reactor: %.4f TON\nфлор на кусочек: %.4f TON\nСредняя цена всех кусочков: %.2f TON\n----------------\nпрофит по цене минта: %.2f%%\nпрофит по флору кусочков: %.2f%% \n средний профит сообщества: %.2f%%",
+			msg := fmt.Sprintf("цена минта: 1.4 TON\nфлор на Heart Locket Reactor: %.4f TON\nфлор на кусочек: %.4f TON\nСредняя цена всех кусочков: %.2f TON\n----------------\nпрофит по цене минта: %.2f%%\nпрофит по флору кусочков: %.2f%% \nсредний профит сообщества: %.2f%%",
 				price, priceg, avgPrice, startprofit, endprofit, avgprofit)
 			bot.Send(&telebot.Chat{ID: id}, msg)
 			time.Sleep(1 * time.Hour)

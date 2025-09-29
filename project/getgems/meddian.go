@@ -15,7 +15,7 @@ const (
 	apiKey          = "1759093403351-mainnet-9508047-r-Rodf2lVdSIS22ecj6daQcNQTSZLiGTJmmrfJi0Xo2gdppFPU"
 	baseURL         = "https://api.getgems.io/public-api/v1/nft/history/"
 	defaultPrice    = 1.4
-	requestInterval = 760 * time.Millisecond
+	requestInterval = 770 * time.Millisecond
 )
 
 type Response struct {
@@ -118,7 +118,7 @@ func GetAveragePrice() float64 {
 		lastPrice := getLastPrice(address)
 		sum += lastPrice
 		count++
-		if count%100 == 0 || count == total {
+		if count%10 == 0 || count == total {
 			log.Printf("📊 Обработано %d из %d NFT, текущая средняя цена: %.2f TON",
 				count, total, sum/float64(count))
 		}
