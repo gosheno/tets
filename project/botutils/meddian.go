@@ -1,4 +1,5 @@
-package getgems
+// GetAveragePriceNoCache читает адреса из файла и возвращает среднюю цену всех NFT без кеширования
+package botutils
 
 import (
 	"bufio"
@@ -9,6 +10,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/go-redis/redis/v8"
 )
 
 const (
@@ -17,6 +20,7 @@ const (
 	defaultPrice    = 1.4
 	requestInterval = 770 * time.Millisecond
 )
+
 
 type Response struct {
 	Response struct {
@@ -32,7 +36,7 @@ type Item struct {
 	} `json:"typeData"`
 }
 
-// Получение последней цены по адресу NFT
+// Получение последней цены по адресу NFT с кешированием
 func getLastPrice(address string) float64 {
 	url := fmt.Sprintf("%s%s?limit=1&types=mint&types=sold", baseURL, address)
 	req, err := http.NewRequest("GET", url, nil)
@@ -63,30 +67,49 @@ func getLastPrice(address string) float64 {
 	}
 
 	lastItem := result.Response.Items[0]
-
+	var price float64
 	switch lastItem.TypeData.Type {
 	case "sold":
-		price, err := strconv.ParseFloat(lastItem.TypeData.Price, 64)
+		price, err = strconv.ParseFloat(lastItem.TypeData.Price, 64)
 		if err != nil || price <= 0 {
 			log.Printf("⚠️ Некорректная цена для NFT %s, используем defaultPrice %.2f\n", address, defaultPrice)
-			return defaultPrice
+			price = defaultPrice
 		}
-		return price
 	case "mint":
-		return defaultPrice
+		price = defaultPrice
 	default:
 		log.Printf("⚠️ Неизвестный тип транзакции '%s' для NFT %s, используем defaultPrice %.2f\n",
 			lastItem.TypeData.Type, address, defaultPrice)
-		return defaultPrice
+		price = defaultPrice
 	}
+	return price
 }
 
-// GetAveragePrice читает адреса из файла и возвращает среднюю цену всех NFT
-func GetAveragePrice() float64 {
+// GetAveragePrice читает адреса из файла и возвращает среднюю цену всех NFT с кешированием
+func GetAveragePrice(redisClient *redis.Client, sendProgress func(text string)) (float64, bool) {
+	cacheKey := "nft_avg_price"
+	cached, err := GetValue(redisClient, cacheKey)
+	sendProgress("ща чекну")
+	time.Sleep(1 * time.Second) // Небольшая пауза для UX
+	if err == nil && cached != "" {
+		price, err := strconv.ParseFloat(cached, 64)
+		if err == nil {
+			fmt.Println("[Redis] Возврат из кеша средней цены:", price)
+			return price, true
+		}
+	}
+	return GetAveragePriceNoCache(redisClient, sendProgress)
+}
+
+func GetAveragePriceNoCache(redisClient *redis.Client, sendProgress func(text string)) (float64, bool) {
+	cacheKey := "nft_avg_price"
 	file, err := os.Open("nft_addresses.txt")
+	sendProgress("придется подождать, считываю адреса..." + "\n" + "📊 Обработано 0 из 1000 NFT")
+
 	if err != nil {
 		log.Println("❌ Ошибка открытия файла:", err)
-		return defaultPrice
+		sendProgress("Ошибка открытия файла адресов")
+		return defaultPrice, false
 	}
 	defer file.Close()
 
@@ -99,7 +122,8 @@ func GetAveragePrice() float64 {
 	}
 	if err := scanner.Err(); err != nil {
 		log.Println("❌ Ошибка чтения файла:", err)
-		return defaultPrice
+		sendProgress("Ошибка чтения файла адресов")
+		return defaultPrice, false
 	}
 
 	// Сброс сканера для повторного чтения
@@ -119,22 +143,29 @@ func GetAveragePrice() float64 {
 		sum += lastPrice
 		count++
 		if count%10 == 0 || count == total {
+			
+			var msg = fmt.Sprintf("придется подождать, считываю адреса..." + "\n" + "📊 Обработано %d из %d NFT", count, total)
+			sendProgress(msg)
 			log.Printf("📊 Обработано %d из %d NFT, текущая средняя цена: %.2f TON",
 				count, total, sum/float64(count))
 		}
 	}
-	
+
 	if err := scanner.Err(); err != nil {
 		log.Println("❌ Ошибка чтения файла:", err)
-		return defaultPrice
+		return defaultPrice, false
 	}
 
+	log.Printf("📊 Обработка NFT")
+	sendProgress("📊 Обработка завершена")
+	time.Sleep(1 * time.Second) // Небольшая пауза для UX
 	if count == 0 {
-		log.Println("❌ Нет NFT для расчета средней цены")
-		return defaultPrice
+		return defaultPrice, false
 	}
-	log.Printf("📊 Обработка NFT завершена")
-		
 	avgPrice := sum / float64(count)
-	return avgPrice
+	err = redisClient.Set(Ctx, cacheKey, fmt.Sprintf("%f", avgPrice), time.Hour*10).Err()
+	if err != nil {
+		log.Println("❌ Ошибка установки значения в Redis:", err)
+	}
+	return avgPrice, false
 }

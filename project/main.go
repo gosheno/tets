@@ -1,16 +1,12 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
 	"os"
-	"strconv"
+	"tg-getgems-bot/botutils"
+	"tg-getgems-bot/chatbot"
 	"time"
-
-	"tg-getgems-bot/getgems"
 
 	"github.com/joho/godotenv"
 	"gopkg.in/telebot.v3"
@@ -50,93 +46,6 @@ type AttrValues struct {
 	MinPriceNano string `json:"minPriceNano"`
 }
 
-// ------------------ логика получения цены ------------------
-
-func getMinPrice() (float64, []byte, error) {
-	url := "https://api.getgems.io/public-api/v1/collection/attributes/EQC4XEulxb05Le5gF6esMtDWT5XZ6tlzlMBQGNsqffxpdC5U"
-
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return 0, nil, err
-	}
-
-	req.Header.Set("accept", "application/json")
-	req.Header.Set("Authorization", os.Getenv("GETGEMS_TOKEN"))
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return 0, nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return 0, nil, fmt.Errorf("status %s", resp.Status)
-	}
-
-	// читаем тело полностью
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return 0, nil, err
-	}
-
-	var data ApiResponse
-	if err := json.Unmarshal(bodyBytes, &data); err != nil {
-		return 0, bodyBytes, err
-	}
-
-	// ищем model.reactor.minPrice
-	for _, attr := range data.Response.Attributes {
-		for _, v := range attr.Values {
-			if v.Value == "Reactor" {
-				price, err := strconv.ParseFloat(v.MinPrice, 64)
-				if err != nil {
-					return 0, bodyBytes, err
-				}
-				return price, bodyBytes, nil
-			}
-		}
-	}
-	return 0, bodyBytes, fmt.Errorf("не найден model.reactor.MinPriceNano")
-}
-
-func getMinPriceGreen() (float64, []byte, error) {
-	url := "https://api.getgems.io/public-api/v1/collection/stats/EQAnmo8tBH8gSErzWDrdlJiF8kxgfJEynKMIBxL2MkuHvPBc"
-
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return 0, nil, err
-	}
-
-	req.Header.Set("accept", "application/json")
-	req.Header.Set("Authorization", os.Getenv("GETGEMS_TOKEN"))
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return 0, nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return 0, nil, fmt.Errorf("status %s", resp.Status)
-	}
-
-	// читаем тело полностью
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return 0, nil, err
-	}
-
-	var data ApiResponseGreen
-	if err := json.Unmarshal(bodyBytes, &data); err != nil {
-		return 0, bodyBytes, err
-	}
-
-	// ищем model.reactor.minPrice
-	return data.Response.FloorPrice, bodyBytes, nil
-}
-
 // ------------------ запуск бота ------------------
 
 func main() {
@@ -154,42 +63,45 @@ func main() {
 		log.Fatal(err)
 	}
 
-	chatID := os.Getenv("CHAT_ID")
-	// adminID := os.Getenv("ADMIN_ID")
-	// команда для проверки вручную
-	bot.Handle("/check", func(c telebot.Context) error {
-		price, _, _ := getMinPrice()
-		priceg, _, _ := getMinPriceGreen()
-		startprofit := (price/1000 - 1.4) / 1.4 * 100
-		endprofit := (price/1000 - priceg) / priceg * 100
+	// Инициализация Redis-клиента
+	redisAddr := os.Getenv("REDIS_ADDR")
+	if redisAddr == "" {
+		redisAddr = "localhost:6379"
+	}
+	redisPassword := os.Getenv("REDIS_PASSWORD")
+	redisDB := 0
+	cb := chatbot.NewSimpleBot("MyBot", botutils.NewRedisClient(redisAddr, redisPassword, redisDB))
 
-		// Получаем среднюю цену всех NFT через функцию из getgems/meddian.go
-		avgPrice := getgems.GetAveragePrice()
-
-		c.Send(fmt.Sprintf(
-			"цена минта: 1.4\nфлор на Heart Locket Reactor: %.4f\nфлор на кусочек: %.4f\n----------------\nпрофит по цене минта: %.2f%%\nпрофит по флору кусочков: %.2f%%\nСредняя цена всех NFT: %.2f TON",
-			price, priceg, startprofit, endprofit, avgPrice))
+	// Обработка всех текстовых сообщений через chatbot
+	bot.Handle(telebot.OnText, func(c telebot.Context) error {
+		cb.HandleMessage(c)
 		return nil
 	})
 
-	// авто-проверка каждыq час
+	// Запуск /floor раз в час
 	go func() {
 		for {
-			price, _, _ := getMinPrice()
-			priceg, _, _ := getMinPriceGreen()
-			startprofit := (price/1000 - 1.4) / 1.4 * 100
-			endprofit := (price/1000 - priceg) / priceg * 100
-
-			// Получаем среднюю цену всех NFT через функцию из getgems/meddian.go
-			id := parseChatID(chatID)
-			// admin := parseChatID(adminID)
-			// bot.Send(&telebot.Chat{ID: admin}, "начался сбор средней цены")
-			avgPrice := getgems.GetAveragePrice()
-			avgprofit := (price/1000 - avgPrice) / avgPrice * 100
-			msg := fmt.Sprintf("цена минта: 1.4 TON\nфлор на Heart Locket Reactor: %.4f TON\nфлор на кусочек: %.4f TON\nСредняя цена всех кусочков: %.2f TON\n----------------\nпрофит по цене минта: %.2f%%\nпрофит по флору кусочков: %.2f%% \nсредний профит сообщества: %.2f%%",
-				price, priceg, avgPrice, startprofit, endprofit, avgprofit)
-			bot.Send(&telebot.Chat{ID: id}, msg)
-			time.Sleep(1 * time.Hour)
+			adminID := os.Getenv("CHAT_ID")
+			if adminID == "" {
+				log.Println("ADMIN_CHAT_ID не задан, /floor не будет отправлен")
+			} else {
+				id := parseChatID(adminID)
+				// Получаем данные для сообщения
+				price, _, _ := botutils.GetMinPrice(cb.RedisClient)
+				priceg, _, _ := botutils.GetMinPriceGreen(cb.RedisClient)
+				avgPrice, _, _ := botutils.GetMinPrice(cb.RedisClient) // Можно заменить на getgems.GetAveragePrice если нужно
+				startprofit := (price/1000 - 1.4) / 1.4 * 100
+				endprofit := (price/1000 - priceg) / priceg * 100
+				avgProfit := (price/1000 - avgPrice) / avgPrice * 100
+				msg := fmt.Sprintf(
+					"цена минта: 1.4\nфлор на Heart Locket Reactor: %.4f\nфлор на кусочек: %.4f\nСредняя цена всех NFT: %.2f TON\n----------------\nпрофит по цене минта: %.2f%%\nпрофит по флору кусочков: %.2f%%\nсредний профит комьюнити: %.2f%%",
+					price, priceg, avgPrice, startprofit, endprofit, avgProfit)
+				_, err := bot.Send(&telebot.User{ID: id}, msg)
+				if err != nil {
+					log.Printf("Ошибка отправки /floor: %v", err)
+				}
+			}
+			time.Sleep(time.Hour)
 		}
 	}()
 

@@ -1,4 +1,4 @@
-package getgems
+package botutils
 
 import (
 	"encoding/json"
