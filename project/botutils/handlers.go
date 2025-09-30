@@ -10,7 +10,6 @@ import (
 
 // HandleFloorCheck processes /floor and /check commands for SimpleBot
 func HandleFloorCheck(
-	user string,
 	redisClient *redis.Client,
 	c telebot.Context,
 	) string {
@@ -20,6 +19,9 @@ func HandleFloorCheck(
 		endprofit := (price/1000 - priceg) / priceg * 100
 		var sentMsgID *telebot.Message = nil
 		sendProgress := func(text string) {
+			if c == nil {
+				return
+			}
 			if sentMsgID == nil {
 				msg, err := c.Bot().Send(c.Chat(), text)
 				if err != nil {
@@ -35,13 +37,15 @@ func HandleFloorCheck(
 		avgProfit := (price/1000 - avgPrice) / avgPrice * 100
 		
 		sendProgress(fmt.Sprintf(
-			"цена минта: 1.4\nфлор на Heart Locket Reactor: %.4f\nфлор на кусочек: %.4f\nСредняя цена всех NFT: %.2f TON\n----------------\nпрофит по цене минта: %.2f%%\nпрофит по флору кусочков: %.2f%%\nсредний профит комьюнити: %.2f%%",
+			"цена минта: 1.4\nфлор на Heart Locket Reactor: %.2f\nфлор на кусочек: %.2f\nСредняя цена всех NFT: %.2f TON\n----------------\nпрофит по цене минта: %.2f%%\nпрофит по флору кусочков: %.2f%%\nсредний профит комьюнити: %.2f%%",
 			price, priceg, avgPrice, startprofit, endprofit, avgProfit))
-		return ""
+
+		return fmt.Sprintf(
+			"цена минта: 1.4\nфлор на Heart Locket Reactor: %.2f\nфлор на кусочек: %.2f\nСредняя цена всех NFT: %.2f TON\n----------------\nпрофит по цене минта: %.2f%%\nпрофит по флору кусочков: %.2f%%\nсредний профит комьюнити: %.2f%%",
+			price, priceg, avgPrice, startprofit, endprofit, avgProfit)
 	}
 
 func HandleFloorCheckNoCache(
-	user string,
 	redisClient *redis.Client,
 	c telebot.Context,
 	) string {
@@ -66,7 +70,9 @@ func HandleFloorCheckNoCache(
 		avgProfit := (price/1000 - avgPrice) / avgPrice * 100
 		
 		sendProgress(fmt.Sprintf(
-			"цена минта: 1.4\nфлор на Heart Locket Reactor: %.4f\nфлор на кусочек: %.4f\nСредняя цена всех NFT: %.2f TON\n----------------\nпрофит по цене минта: %.2f%%\nпрофит по флору кусочков: %.2f%%\nсредний профит комьюнити: %.2f%%",
+			"цена минта: 1.4\nфлор на Heart Locket Reactor: %.2f\nфлор на кусочек: %.2f\nСредняя цена всех NFT: %.2f TON\n----------------\nпрофит по цене минта: %.2f%%\nпрофит по флору кусочков: %.2f%%\nсредний профит комьюнити: %.2f%%",
 			price, priceg, avgPrice, startprofit, endprofit, avgProfit))
-		return ""
+		return fmt.Sprintf(
+			"цена минта: 1.4\nфлор на Heart Locket Reactor: %.2f\nфлор на кусочек: %.2f\nСредняя цена всех NFT: %.2f TON\n----------------\nпрофит по цене минта: %.2f%%\nпрофит по флору кусочков: %.2f%%\nсредний профит комьюнити: %.2f%%",
+			price, priceg, avgPrice, startprofit, endprofit, avgProfit)
 	}

@@ -86,16 +86,8 @@ func main() {
 				log.Println("ADMIN_CHAT_ID не задан, /floor не будет отправлен")
 			} else {
 				id := parseChatID(adminID)
-				// Получаем данные для сообщения
-				price, _, _ := botutils.GetMinPrice(cb.RedisClient)
-				priceg, _, _ := botutils.GetMinPriceGreen(cb.RedisClient)
-				avgPrice, _, _ := botutils.GetMinPrice(cb.RedisClient) // Можно заменить на getgems.GetAveragePrice если нужно
-				startprofit := (price/1000 - 1.4) / 1.4 * 100
-				endprofit := (price/1000 - priceg) / priceg * 100
-				avgProfit := (price/1000 - avgPrice) / avgPrice * 100
-				msg := fmt.Sprintf(
-					"цена минта: 1.4\nфлор на Heart Locket Reactor: %.4f\nфлор на кусочек: %.4f\nСредняя цена всех NFT: %.2f TON\n----------------\nпрофит по цене минта: %.2f%%\nпрофит по флору кусочков: %.2f%%\nсредний профит комьюнити: %.2f%%",
-					price, priceg, avgPrice, startprofit, endprofit, avgProfit)
+		
+				msg := botutils.HandleFloorCheck(cb.RedisClient, nil)
 				_, err := bot.Send(&telebot.User{ID: id}, msg)
 				if err != nil {
 					log.Printf("Ошибка отправки /floor: %v", err)

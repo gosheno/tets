@@ -24,10 +24,10 @@ func NewSimpleBot(name string, redisClient *redis.Client) *SimpleBot {
 // HandleMessage processes incoming messages and returns a response
 func (b *SimpleBot) HandleMessage(c telebot.Context) string {
 	if c.Text() == "/floor" || c.Text() == "/check" {
-		return botutils.HandleFloorCheck(b.Name, b.RedisClient, c)
+		return botutils.HandleFloorCheck(b.RedisClient, c)
 	}
 	if c.Text() == "/check_current" {
-		return botutils.HandleFloorCheckNoCache(b.Name, b.RedisClient, c)
+		return botutils.HandleFloorCheckNoCache(b.RedisClient, c)
 	}
 	return ""
 }
