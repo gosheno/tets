@@ -1,8 +1,9 @@
-version: '3.8'
 
 services:
   app:
-    image: golang:1.21
+    build:
+      context: ./project
+      dockerfile: dockerfile
     container_name: go_app
     working_dir: /app
     volumes:
