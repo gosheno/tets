@@ -111,7 +111,7 @@ func GetAveragePrice() float64 {
 
 	var sum float64
 	var count int
-
+	log.Printf("📊 Обработка NFT начата")
 	for scanner.Scan() {
 		address := scanner.Text()
 		<-ticker.C // Ждем перед запросом
@@ -122,11 +122,8 @@ func GetAveragePrice() float64 {
 			log.Printf("📊 Обработано %d из %d NFT, текущая средняя цена: %.2f TON",
 				count, total, sum/float64(count))
 		}
-		if count == 20{
-			break
-		} 
 	}
-
+	
 	if err := scanner.Err(); err != nil {
 		log.Println("❌ Ошибка чтения файла:", err)
 		return defaultPrice
@@ -136,7 +133,8 @@ func GetAveragePrice() float64 {
 		log.Println("❌ Нет NFT для расчета средней цены")
 		return defaultPrice
 	}
-	
+	log.Printf("📊 Обработка NFT завершена")
+		
 	avgPrice := sum / float64(count)
 	return avgPrice
 }
