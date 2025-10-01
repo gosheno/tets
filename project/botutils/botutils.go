@@ -1,14 +1,16 @@
 package botutils
+
 import (
-	
-		"encoding/json"
-		"fmt"
-		"io"
-		"net/http"
-		"os"
-		"strconv"
-		"github.com/go-redis/redis/v8"
-	)
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"strconv"
+	apiqueue "tg-getgems-bot/api"
+
+	"github.com/go-redis/redis/v8"
+)
 
 type ApiResponse struct {
 	Success  bool `json:"success"`
@@ -62,8 +64,7 @@ func GetMinPrice(redisClient *redis.Client) (float64, []byte, error) {
 	}
 	req.Header.Set("accept", "application/json")
 	req.Header.Set("Authorization", os.Getenv("GETGEMS_TOKEN"))
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := apiqueue.Queue.Enqueue(req, apiqueue.High)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -114,8 +115,7 @@ func GetMinPriceGreen(redisClient *redis.Client) (float64, []byte, error) {
 	}
 	req.Header.Set("accept", "application/json")
 	req.Header.Set("Authorization", os.Getenv("GETGEMS_TOKEN"))
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := apiqueue.Queue.Enqueue(req, apiqueue.High)
 	if err != nil {
 		return 0, nil, err
 	}

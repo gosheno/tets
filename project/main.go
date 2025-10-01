@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	apiqueue "tg-getgems-bot/api"
 	"tg-getgems-bot/botutils"
 	"tg-getgems-bot/chatbot"
 	"time"
@@ -78,6 +79,8 @@ func main() {
 		return nil
 	})
 	cb.RedisClient.FlushAll(botutils.Ctx)
+	apiqueue.InitPriorityQueue(100, 100, 770*time.Millisecond)
+
 	// Запуск /floor раз в час
 	go func() {
 		for {

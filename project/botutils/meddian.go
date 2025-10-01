@@ -9,10 +9,11 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	apiqueue "tg-getgems-bot/api"
 	"time"
 
-	"golang.org/x/sync/singleflight"
 	"github.com/go-redis/redis/v8"
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -48,8 +49,7 @@ func getLastPrice(address string) float64 {
 	req.Header.Add("accept", "application/json")
 	req.Header.Add("Authorization", apiKey)
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := apiqueue.Queue.Enqueue(req, apiqueue.Low)
 	if err != nil {
 		log.Println("❌ Ошибка HTTP-запроса:", err)
 		return defaultPrice
@@ -166,6 +166,9 @@ func GetAveragePriceNoCache(redisClient *redis.Client, sendProgress func(text st
 
         sum += lastPrice
         count++
+		if count == 10 {
+			break
+		}
         // Прогресс каждые 10 или на последней NFT
         if count%10 == 0 || count == total {
             msg := fmt.Sprintf("📊 Обработано %d из %d NFT", count, total)
