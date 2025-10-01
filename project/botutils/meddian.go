@@ -17,7 +17,6 @@ import (
 )
 
 const (
-	apiKey          = "1759093403351-mainnet-9508047-r-Rodf2lVdSIS22ecj6daQcNQTSZLiGTJmmrfJi0Xo2gdppFPU"
 	baseURL         = "https://api.getgems.io/public-api/v1/nft/history/"
 	defaultPrice    = 1.4
 	requestInterval = 770 * time.Millisecond
@@ -47,6 +46,7 @@ func getLastPrice(address string) float64 {
 		return defaultPrice
 	}
 	req.Header.Add("accept", "application/json")
+	apiKey := os.Getenv("GETGEMS_TOKEN")
 	req.Header.Add("Authorization", apiKey)
 	resp, err := apiqueue.Queue.Enqueue(req, apiqueue.Low)
 	if err != nil {
@@ -165,9 +165,6 @@ func GetAveragePriceNoCache(redisClient *redis.Client, sendProgress func(text st
 
         sum += lastPrice
         count++
-		if count == 10 {
-			break
-		}
         // Прогресс каждые 10 или на последней NFT
         if count%10 == 0 || count == total {
             msg := fmt.Sprintf("📊 Обработано %d из %d NFT", count, total)
