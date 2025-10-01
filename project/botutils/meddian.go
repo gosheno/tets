@@ -149,6 +149,9 @@ func GetAveragePriceNoCache(redisClient *redis.Client, sendProgress func(text st
 			log.Printf("📊 Обработано %d из %d NFT, текущая средняя цена: %.2f TON",
 				count, total, sum/float64(count))
 		}
+		if count ==20{
+			break
+		}
 	}
 
 	if err := scanner.Err(); err != nil {

@@ -82,18 +82,24 @@ func main() {
 	go func() {
 		for {
 			adminID := os.Getenv("CHAT_ID")
+			threadid := os.Getenv("THREAD_ID")
 			if adminID == "" {
 				log.Println("ADMIN_CHAT_ID не задан, /floor не будет отправлен")
 			} else {
 				id := parseChatID(adminID)
-		
+				thr := parseTreadID(threadid)
+				chat := &telebot.Chat{ID: id}
 				msg := botutils.HandleFloorCheck(cb.RedisClient, nil)
-				_, err := bot.Send(&telebot.User{ID: id}, msg)
+				_, err = bot.Send(
+					chat,
+					msg,
+					&telebot.SendOptions{ThreadID: thr},
+				)
 				if err != nil {
 					log.Printf("Ошибка отправки /floor: %v", err)
 				}
 			}
-			time.Sleep(time.Hour)
+			time.Sleep(time.Minute)
 		}
 	}()
 
@@ -103,6 +109,11 @@ func main() {
 
 func parseChatID(s string) int64 {
 	var id int64
+	fmt.Sscan(s, &id)
+	return id
+}
+func parseTreadID(s string) int {
+	var id int
 	fmt.Sscan(s, &id)
 	return id
 }
