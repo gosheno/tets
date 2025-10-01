@@ -77,7 +77,7 @@ func main() {
 		cb.HandleMessage(c)
 		return nil
 	})
-
+	cb.RedisClient.FlushAll(botutils.Ctx)
 	// Запуск /floor раз в час
 	go func() {
 		for {

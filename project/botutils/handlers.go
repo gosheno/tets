@@ -33,11 +33,11 @@ func HandleFloorCheck(redisClient *redis.Client,c telebot.Context,) string {
 			}
 		}
 		
-		avgPrice, _ := GetAveragePrice(redisClient, sendProgress)
 		price, _, _ := GetMinPrice(redisClient)
 		priceg, _, _ := GetMinPriceGreen(redisClient)
 		startprofit := (price/1000 - 1.4) / 1.4 * 100
 		endprofit := (price/1000 - priceg) / priceg * 100
+		avgPrice, _ := GetAveragePrice(redisClient, sendProgress)
 		avgProfit := (price/1000 - avgPrice) / avgPrice * 100
 		
 		if c != nil {
@@ -74,11 +74,11 @@ func HandleFloorCheckNoCache(redisClient *redis.Client,c telebot.Context,) strin
 			}
 		}
 
-		avgPrice, _ := GetAveragePriceNoCache(redisClient, sendProgress)
 		price, _, _ := GetMinPrice(redisClient)
 		priceg, _, _ := GetMinPriceGreen(redisClient)
 		startprofit := (price/1000 - 1.4) / 1.4 * 100
 		endprofit := (price/1000 - priceg) / priceg * 100
+		avgPrice, _ := GetAveragePriceNoCache(redisClient, sendProgress)
 		avgProfit := (price/1000 - avgPrice) / avgPrice * 100
 
 		msg := fmt.Sprintf(

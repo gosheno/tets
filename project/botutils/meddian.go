@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"time"
 
+	"golang.org/x/sync/singleflight"
 	"github.com/go-redis/redis/v8"
 )
 
@@ -101,71 +102,91 @@ func GetAveragePrice(redisClient *redis.Client, sendProgress func(text string)) 
 	return GetAveragePriceNoCache(redisClient, sendProgress)
 }
 
+var requestGroup singleflight.Group
 func GetAveragePriceNoCache(redisClient *redis.Client, sendProgress func(text string)) (float64, bool) {
-	cacheKey := "nft_avg_price"
-	file, err := os.Open("nft_addresses.txt")
-	sendProgress("придется подождать, считываю адреса..." + "\n" + "📊 Обработано 0 из 1000 NFT")
+    cacheKey := "nft_avg_price"
+    file, err := os.Open("nft_addresses.txt")
+    sendProgress("📊 Начинаю считывать адреса...")
 
-	if err != nil {
-		log.Println("❌ Ошибка открытия файла:", err)
-		sendProgress("Ошибка открытия файла адресов")
-		return defaultPrice, false
-	}
-	defer file.Close()
+    if err != nil {
+        log.Println("❌ Ошибка открытия файла:", err)
+        sendProgress("Ошибка открытия файла адресов")
+        return defaultPrice, false
+    }
+    defer file.Close()
 
-	scanner := bufio.NewScanner(file)
+    scanner := bufio.NewScanner(file)
 
-	// Подсчёт общего количества строк для прогресса
-	var total int
-	for scanner.Scan() {
-		total++
-	}
-	if err := scanner.Err(); err != nil {
-		log.Println("❌ Ошибка чтения файла:", err)
-		sendProgress("Ошибка чтения файла адресов")
-		return defaultPrice, false
-	}
+    // Подсчёт общего количества строк
+    var total int
+    for scanner.Scan() {
+        total++
+    }
+    if err := scanner.Err(); err != nil {
+        log.Println("❌ Ошибка чтения файла:", err)
+        return defaultPrice, false
+    }
 
-	// Сброс сканера для повторного чтения
-	file.Seek(0, 0)
-	scanner = bufio.NewScanner(file)
+    // Сброс сканера
+    file.Seek(0, 0)
+    scanner = bufio.NewScanner(file)
 
-	ticker := time.NewTicker(requestInterval)
-	defer ticker.Stop()
+    ticker := time.NewTicker(requestInterval)
+    defer ticker.Stop()
 
-	var sum float64
-	var count int
-	log.Printf("📊 Обработка NFT начата")
-	for scanner.Scan() {
-		address := scanner.Text()
-		<-ticker.C // Ждем перед запросом
-		lastPrice := getLastPrice(address)
-		sum += lastPrice
-		count++
-		if count%10 == 0 || count == total {
-			
-			var msg = fmt.Sprintf("придется подождать, считываю адреса..." + "\n" + "📊 Обработано %d из %d NFT", count, total)
-			sendProgress(msg)
-			log.Printf("📊 Обработано %d из %d NFT, текущая средняя цена: %.2f TON",
-				count, total, sum/float64(count))
-		}
-	}
+    var sum float64
+    var count int
 
-	if err := scanner.Err(); err != nil {
-		log.Println("❌ Ошибка чтения файла:", err)
-		return defaultPrice, false
-	}
+    log.Printf("📊 Обработка NFT начата")
 
-	log.Printf("📊 Обработка NFT")
-	sendProgress("📊 Обработка завершена")
-	time.Sleep(1 * time.Second) // Небольшая пауза для UX
-	if count == 0 {
-		return defaultPrice, false
-	}
-	avgPrice := sum / float64(count)
-	err = redisClient.Set(Ctx, cacheKey, fmt.Sprintf("%f", avgPrice), time.Hour*10).Err()
-	if err != nil {
-		log.Println("❌ Ошибка установки значения в Redis:", err)
-	}
-	return avgPrice, false
+    sem := make(chan struct{}, 1) // максимум 5 одновременных запросов
+
+    for scanner.Scan() {
+        address := scanner.Text()
+
+        addrCacheKey := fmt.Sprintf("nft_price:%s", address)
+        cachedPrice, err := redisClient.Get(Ctx, addrCacheKey).Result()
+        var lastPrice float64
+        if err == nil {
+			fmt.Print("[cache] ", address, "\n")
+            lastPrice, _ = strconv.ParseFloat(cachedPrice, 64)
+        } else {
+            // Запрос через singleflight + semaphore
+            val, _, _ := requestGroup.Do(addrCacheKey, func() (interface{}, error) {
+                sem <- struct{}{}          // блокировка
+                defer func() { <-sem }()   // освобождение
+                <-ticker.C                  // задержка между запросами
+                lastPrice := getLastPrice(address)
+				fmt.Print("[api] ", address, "\n")
+                redisClient.Set(Ctx, addrCacheKey, fmt.Sprintf("%f", lastPrice), time.Hour)
+                return lastPrice, nil
+            })
+            lastPrice = val.(float64)
+        }
+
+        sum += lastPrice
+        count++
+        // Прогресс каждые 10 или на последней NFT
+        if count%10 == 0 || count == total {
+            msg := fmt.Sprintf("📊 Обработано %d из %d NFT", count, total)
+            sendProgress(msg)
+            log.Printf("📊 Прогресс: %d/%d, текущая средняя: %.2f TON", count, total, sum/float64(count))
+        }
+    }
+
+    if err := scanner.Err(); err != nil {
+        log.Println("❌ Ошибка чтения файла:", err)
+        return defaultPrice, false
+    }
+
+    avgPrice := sum / float64(count)
+    // Сохраняем среднюю цену в кэш
+    err = redisClient.Set(Ctx, cacheKey, fmt.Sprintf("%f", avgPrice), time.Hour*10).Err()
+    if err != nil {
+        log.Println("❌ Ошибка установки средней цены в Redis:", err)
+    }
+
+    sendProgress("📊 Обработка завершена")
+    time.Sleep(1 * time.Second)
+    return avgPrice, true
 }
