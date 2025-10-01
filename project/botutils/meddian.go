@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	apiqueue "tg-getgems-bot/api"
+	 apiqueue "tg-getgems-bot/api"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -48,7 +48,6 @@ func getLastPrice(address string) float64 {
 	}
 	req.Header.Add("accept", "application/json")
 	req.Header.Add("Authorization", apiKey)
-
 	resp, err := apiqueue.Queue.Enqueue(req, apiqueue.Low)
 	if err != nil {
 		log.Println("❌ Ошибка HTTP-запроса:", err)

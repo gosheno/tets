@@ -4,10 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
-	apiqueue "tg-getgems-bot/api"
+	 apiqueue "tg-getgems-bot/api"
 
 	"github.com/go-redis/redis/v8"
 )
@@ -54,15 +55,15 @@ func GetMinPrice(redisClient *redis.Client) (float64, []byte, error) {
 			return price, []byte(fmt.Sprintf("{\"cached\":true,\"price\":%f}", price)), nil
 		}
 	}
-	
 
 	url := "https://api.getgems.io/public-api/v1/collection/attributes/EQC4XEulxb05Le5gF6esMtDWT5XZ6tlzlMBQGNsqffxpdC5U"
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
+		log.Println("❌ Ошибка создания запроса:", err)
 		return 0, nil, err
 	}
-	req.Header.Set("accept", "application/json")
-	req.Header.Set("Authorization", os.Getenv("GETGEMS_TOKEN"))
+	req.Header.Add("accept", "application/json")
+	req.Header.Add("Authorization", os.Getenv("GETGEMS_TOKEN"))
 	resp, err := apiqueue.Queue.Enqueue(req, apiqueue.High)
 	if err != nil {
 		return 0, nil, err
