@@ -99,7 +99,7 @@ func main() {
 					log.Printf("Ошибка отправки /floor: %v", err)
 				}
 			}
-			time.Sleep(time.Minute)
+			time.Sleep(time.Hour)
 		}
 	}()
 
