@@ -55,7 +55,6 @@ func GetMinPrice(redisClient *redis.Client) (float64, []byte, error) {
 		}
 	}
 	
-	fmt.Println("[API] Запрос min_price_reactor")
 
 	url := "https://api.getgems.io/public-api/v1/collection/attributes/EQC4XEulxb05Le5gF6esMtDWT5XZ6tlzlMBQGNsqffxpdC5U"
 	req, err := http.NewRequest("GET", url, nil)
@@ -88,11 +87,13 @@ func GetMinPrice(redisClient *redis.Client) (float64, []byte, error) {
 					return 0, bodyBytes, err
 				}
 				// Кэшируем значение на 1 час
+				fmt.Print("[API] min_price_reactor: ", price, "\n")
 				redisClient.Set(Ctx, cacheKey, v.MinPrice, 3600*1_000_000_000) // 1 час в наносекундах
 				return price, bodyBytes, nil
 			}
 		}
 	}
+	print(bodyBytes)
 	return 0, bodyBytes, fmt.Errorf("не найден model.reactor.MinPriceNano")
 }
 
@@ -133,6 +134,7 @@ func GetMinPriceGreen(redisClient *redis.Client) (float64, []byte, error) {
 	}
 
 	// Кэшируем значение на 5 часов
+	fmt.Print("[API] min_price: ", data.Response.FloorPrice, "\n")
 	redisClient.Set(Ctx, cacheKey, fmt.Sprintf("%f", data.Response.FloorPrice), 18000*1_000_000_000) // 1 час в наносекундах
 	return data.Response.FloorPrice, bodyBytes, nil
 }
