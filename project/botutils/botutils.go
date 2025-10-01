@@ -64,7 +64,7 @@ func GetMinPrice(redisClient *redis.Client) (float64, []byte, error) {
 	}
 	req.Header.Add("accept", "application/json")
 	req.Header.Add("Authorization", os.Getenv("GETGEMS_TOKEN"))
-	resp, err := apiqueue.Queue.Enqueue(req, apiqueue.High)
+	resp, err := apiqueue.Queue.Enqueue(req, apiqueue.Low)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -115,9 +115,9 @@ func GetMinPriceGreen(redisClient *redis.Client) (float64, []byte, error) {
 	if err != nil {
 		return 0, nil, err
 	}
-	req.Header.Set("accept", "application/json")
-	req.Header.Set("Authorization", os.Getenv("GETGEMS_TOKEN"))
-	resp, err := apiqueue.Queue.Enqueue(req, apiqueue.High)
+	req.Header.Add("accept", "application/json")
+	req.Header.Add("Authorization", os.Getenv("GETGEMS_TOKEN"))
+	resp, err := apiqueue.Queue.Enqueue(req, apiqueue.Low)
 	if err != nil {
 		return 0, nil, err
 	}
