@@ -84,7 +84,6 @@ func main() {
 	// Запуск /floor раз в час
 	go func() {
 		for {
-			time.Sleep(time.Hour)
 			adminID := os.Getenv("CHAT_ID")
 			threadid := os.Getenv("THREAD_ID")
 			if adminID == "" {
@@ -103,6 +102,7 @@ func main() {
 					log.Printf("Ошибка отправки /floor: %v", err)
 				}
 			}
+			time.Sleep(time.Hour)
 		}
 	}()
 
