@@ -40,14 +40,13 @@ func HandleFloorCheck(redisClient *redis.Client,c telebot.Context,) string {
 		endprofit := (price/1000 - priceg) / priceg * 100
 		avgProfit := (price/1000 - avgPrice) / avgPrice * 100
 		
-		if c == nil || c.Message() == nil || c.Chat() == nil {
-			log.Println()
-			return ""
+		if c != nil {
+			fmt.Print("Ответил в чат %d", c.Chat().ID)
 		}
 		msg := fmt.Sprintf(
-			"%d цена минта: 1.4\nфлор на Heart Locket Reactor: %.2f\nфлор на кусочек: %.2f\nСредняя цена всех NFT: %.2f TON\n----------------\nпрофит по цене минта: %.2f%%\nпрофит по флору кусочков: %.2f%%\nсредний профит комьюнити: %.2f%%",
-			c.Chat().ID, price, priceg, avgPrice, startprofit, endprofit, avgProfit)
-		
+			"цена минта: 1.4\nфлор на Heart Locket Reactor: %.2f\nфлор на кусочек: %.2f\nСредняя цена всех NFT: %.2f TON\n----------------\nпрофит по цене минта: %.2f%%\nпрофит по флору кусочков: %.2f%%\nсредний профит комьюнити: %.2f%%",
+			price, priceg, avgPrice, startprofit, endprofit, avgProfit)
+
 		sendProgress(msg)
 		return msg
 	}
