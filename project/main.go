@@ -102,7 +102,7 @@ func main() {
 					log.Printf("Ошибка отправки /floor: %v", err)
 				}
 			}
-			time.Sleep(time.Hour)
+			time.Sleep(3*time.Hour)
 		}
 	}()
 
