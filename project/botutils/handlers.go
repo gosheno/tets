@@ -11,19 +11,26 @@ import (
 // HandleFloorCheck processes /floor and /check commands for SimpleBot
 func HandleFloorCheck(redisClient *redis.Client,c telebot.Context,) string {
 		var sentMsgID *telebot.Message = nil
-		
-		
-		
-		price, _, _ := GetMinPrice(redisClient)
+		priceOfchain, _, _:=GetFirstOnSalePrice(redisClient)
+		priceOnchain, _, _ :=GetMinPriceFloor(redisClient) 
+		price := Min(priceOfchain, priceOnchain)
 		priceg, _, _ := GetMinPriceGreen(redisClient)
 		startprofit := (price/1000 - 1.4) / 1.4 * 100
 		endprofit := (price/1000 - priceg) / priceg * 100
 
-		sendProgress := func(text string) {
-			txt := fmt.Sprintf(
-			"цена минта: 1.4\nфлор на Heart Locket Reactor: %.2f\nфлор на кусочек: %.2f\nСредняя цена всех NFT: %s\n----------------\nпрофит по цене минта: %.2f%%\nпрофит по флору кусочков: %.2f%%\nсредний профит комьюнити: %s",
-			price, priceg, text, startprofit, endprofit, text)
-
+		sendProgress := func(text string, flag bool) {
+			txt := 
+				fmt.Sprintf("Флор на Heart Locket: %.2f\n", price)+
+							"----------------\n"+
+				fmt.Sprintf("минт: 1.4\nпрофит: %.2f%%\n", startprofit)+
+				"----------------\n"+
+				fmt.Sprintf("флор кусочков: %.2f\nпрофит: %.2f%%\n", priceg, endprofit)+
+				"----------------\n"+
+				fmt.Sprintf("Средняя цена всех NFT: ...\nпрофит сообщества: %s\n", text)+
+				"----------------\n"
+			if flag {
+				txt = text
+			}
 			if c == nil || c.Message() == nil || c.Chat() == nil {
 				return
 			}
@@ -50,26 +57,43 @@ func HandleFloorCheck(redisClient *redis.Client,c telebot.Context,) string {
 		if c != nil {
 			fmt.Printf("Ответил в чат %d\n", c.Chat().ID)
 		}
-		msg := fmt.Sprintf(
-			"цена минта: 1.4\nфлор на Heart Locket Reactor: %.2f\nфлор на кусочек: %.2f\nСредняя цена всех NFT: %.2f TON\n----------------\nпрофит по цене минта: %.2f%%\nпрофит по флору кусочков: %.2f%%\nсредний профит комьюнити: %.2f%%",
-			price, priceg, avgPrice, startprofit, endprofit, avgProfit)
+		msg := 
+				fmt.Sprintf("Флор на Heart Locket: %.2f\n", price)+
+							"----------------\n"+
+				fmt.Sprintf("минт: 1.4\nпрофит: %.2f%%\n", startprofit)+
+				"----------------\n"+
+				fmt.Sprintf("флор кусочков: %.2f\nпрофит: %.2f%%\n", priceg, endprofit)+
+				"----------------\n"+
+				fmt.Sprintf("Средняя цена всех NFT: %.2f\nпрофит сообщества: %.2f%%\n", avgPrice, avgProfit)+
+				"----------------\n"
 
-		sendProgress(msg)
+		sendProgress(msg, false)
 		return msg
 	}
 
 	
-func HandleFloorCheckNoCache(redisClient *redis.Client,c telebot.Context,) string {
+func HandleFloorCheckNoCache(redisClient *redis.Client,c telebot.Context, ) string {
 		var sentMsgID *telebot.Message = nil
-		price, _, _ := GetMinPrice(redisClient)
+		priceOfchain, _, _:=GetFirstOnSalePrice(redisClient)
+		priceOnchain, _, _:=GetMinPriceFloor(redisClient) 
+		price := Min(priceOfchain, priceOnchain)
 		priceg, _, _ := GetMinPriceGreen(redisClient)
 		startprofit := (price/1000 - 1.4) / 1.4 * 100
 		endprofit := (price/1000 - priceg) / priceg * 100
-		sendProgress := func(text string) {
-			txt := fmt.Sprintf(
-			"цена минта: 1.4\nфлор на Heart Locket Reactor: %.2f\nфлор на кусочек: %.2f\nСредняя цена всех NFT: %s\n----------------\nпрофит по цене минта: %.2f%%\nпрофит по флору кусочков: %.2f%%\nсредний профит комьюнити: %s",
-			price, priceg, text, startprofit, endprofit, text)
-
+		sendProgress := func(text string, flag bool) {
+			txt := 
+				fmt.Sprintf("Флор на Heart Locket: %.2f\n", price)+
+							"----------------\n"+
+				fmt.Sprintf("минт: 1.4\nпрофит: %.2f%%\n", startprofit)+
+				"----------------\n"+
+				fmt.Sprintf("флор кусочков: %.2f\nпрофит: %.2f%%\n", priceg, endprofit)+
+				"----------------\n"+
+				fmt.Sprintf("Средняя цена всех NFT: ...\nпрофит сообщества: %s\n", text)+
+				"----------------\n"
+			
+			if flag {
+				txt = text
+			}
 			if c == nil || c.Message() == nil || c.Chat() == nil {
 				return
 			}
@@ -93,10 +117,24 @@ func HandleFloorCheckNoCache(redisClient *redis.Client,c telebot.Context,) strin
 		avgPrice, _ := GetAveragePriceNoCache(redisClient, sendProgress)
 		avgProfit := (price/1000 - avgPrice) / avgPrice * 100
 
-		msg := fmt.Sprintf(
-			"цена минта: 1.4\nфлор на Heart Locket Reactor: %.2f\nфлор на кусочек: %.2f\nСредняя цена всех NFT: %.2f TON\n----------------\nпрофит по цене минта: %.2f%%\nпрофит по флору кусочков: %.2f%%\nсредний профит комьюнити: %.2f%%",
-			price, priceg, avgPrice, startprofit, endprofit, avgProfit)
+		msg := 
+				fmt.Sprintf("Флор на Heart Locket: %.2f\n", price)+
+							"----------------\n"+
+				fmt.Sprintf("минт: 1.4\nпрофит: %.2f%%\n", startprofit)+
+				"----------------\n"+
+				fmt.Sprintf("флор кусочков: %.2f\nпрофит: %.2f%%\n", priceg, endprofit)+
+				"----------------\n"+
+				fmt.Sprintf("Средняя цена всех NFT: %.2f\nпрофит сообщества: %.2f%%\n", avgPrice, avgProfit)+
+				"----------------\n"
 
-		sendProgress(msg)
+		sendProgress(msg, true)
 		return msg
 	}
+
+func Min(priceOfchain, priceOnchain float64) float64 {
+	fmt.Print("Min ", priceOfchain, priceOnchain)
+	if priceOfchain < priceOnchain {
+		return priceOfchain
+	}
+	return priceOnchain
+}
