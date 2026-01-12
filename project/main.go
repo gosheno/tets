@@ -79,7 +79,7 @@ func main() {
 		return nil
 	})
 	cb.RedisClient.FlushAll(botutils.Ctx)
-	apiqueue.InitPriorityQueue(100, 100, 770*time.Millisecond)
+	apiqueue.InitPriorityQueue(100, 100, 1200*time.Millisecond)
 
 	// Запуск /floor раз в час
 	go func() {
@@ -102,9 +102,9 @@ func main() {
 					log.Printf("Ошибка отправки /floor: %v", err)
 				}
 			}
-			time.Sleep(3*time.Hour)
+			time.Sleep(3 * time.Hour)
 		}
-	}() 
+	}()
 	log.Println("Бот запущен")
 	bot.Start()
 }
