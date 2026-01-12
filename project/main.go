@@ -104,8 +104,7 @@ func main() {
 			}
 			time.Sleep(3*time.Hour)
 		}
-	}()
-
+	}() 
 	log.Println("Бот запущен")
 	bot.Start()
 }
