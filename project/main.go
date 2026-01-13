@@ -104,7 +104,7 @@ func main() {
 					log.Printf("Ошибка отправки /floor: %v", err)
 				}
 			}
-			time.Sleep(1 * time.Minute)
+			time.Sleep(3 * time.Hour)
 		}
 	}()
 	log.Println("Бот запущен")
