@@ -162,9 +162,6 @@ func GetAveragePriceNoCache(redisClient *redis.Client) (float64, bool) {
 
 		sum += lastPrice
 		count++
-		if count == 1 {
-			break
-		}
 		// Прогресс каждые 10 или на последней NFT
 		if count%10 == 0 || count == total {
 			log.Printf("📊 Прогресс: %d/%d, текущая средняя: %.2f TON", count, total, sum/float64(count))
