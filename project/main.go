@@ -83,26 +83,28 @@ func main() {
 
 	// Запуск /floor раз в час
 	go func() {
+		var msg *telebot.Message
 		for {
 			adminID := os.Getenv("CHAT_ID")
 			threadid := os.Getenv("THREAD_ID")
+			
 			if adminID == "" {
 				log.Println("ADMIN_CHAT_ID не задан, /floor не будет отправлен")
 			} else {
 				id := parseChatID(adminID)
 				thr := parseTreadID(threadid)
 				chat := &telebot.Chat{ID: id}
-				msg := botutils.HandleFloorCheck(cb.RedisClient, nil)
-				_, err = bot.Send(
-					chat,
-					msg,
-					&telebot.SendOptions{ThreadID: thr},
-				)
+				_, imgPath := botutils.HandleFloorCheck(cb.RedisClient, nil)
+				if msg != nil {
+					bot.Delete(msg)
+				}
+				photo := &telebot.Photo{File: telebot.FromDisk(imgPath)}
+				msg,  err = bot.Send(chat, photo, &telebot.SendOptions{ThreadID: thr})
 				if err != nil {
 					log.Printf("Ошибка отправки /floor: %v", err)
 				}
 			}
-			time.Sleep(3 * time.Hour)
+			time.Sleep(1 * time.Minute)
 		}
 	}()
 	log.Println("Бот запущен")

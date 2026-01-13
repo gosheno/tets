@@ -85,7 +85,7 @@ func getLastPrice(address string) float64 {
 }
 
 // GetAveragePrice читает адреса из файла и возвращает среднюю цену всех NFT с кешированием
-func GetAveragePrice(redisClient *redis.Client, sendProgress func(text string, flag bool)) (float64, bool) {
+func GetAveragePrice(redisClient *redis.Client) (float64, bool) {
 	cacheKey := "nft_avg_price"
 	cached, err := GetValue(redisClient, cacheKey)
 	time.Sleep(1 * time.Second) // Небольшая пауза для UX
@@ -96,19 +96,17 @@ func GetAveragePrice(redisClient *redis.Client, sendProgress func(text string, f
 			return price, true
 		}
 	}
-	return GetAveragePriceNoCache(redisClient, sendProgress)
+	return GetAveragePriceNoCache(redisClient)
 }
 
 var requestGroup singleflight.Group
 
-func GetAveragePriceNoCache(redisClient *redis.Client, sendProgress func(text string, flag bool)) (float64, bool) {
+func GetAveragePriceNoCache(redisClient *redis.Client) (float64, bool) {
 	cacheKey := "nft_avg_price"
 	file, err := os.Open("nft_addresses.txt")
-	sendProgress("придется немного подождать...", false)
-
+	
 	if err != nil {
 		log.Println("❌ Ошибка открытия файла:", err)
-		sendProgress("Ошибка открытия файла адресов", false)
 		return defaultPrice, false
 	}
 	defer file.Close()
@@ -164,10 +162,11 @@ func GetAveragePriceNoCache(redisClient *redis.Client, sendProgress func(text st
 
 		sum += lastPrice
 		count++
+		if count == 1 {
+			break
+		}
 		// Прогресс каждые 10 или на последней NFT
 		if count%10 == 0 || count == total {
-			msg := fmt.Sprintf("загружается..")
-			sendProgress(msg, false)
 			log.Printf("📊 Прогресс: %d/%d, текущая средняя: %.2f TON", count, total, sum/float64(count))
 		}
 
@@ -185,7 +184,6 @@ func GetAveragePriceNoCache(redisClient *redis.Client, sendProgress func(text st
 		log.Println("❌ Ошибка установки средней цены в Redis:", err)
 	}
 
-	sendProgress("📊 Обработка завершена", false)
 	time.Sleep(1 * time.Second)
 	return avgPrice, true
 }
