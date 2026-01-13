@@ -350,6 +350,7 @@ var ttfBytes []byte
 type FragmentCount struct {
 	Day, Week, Month int
 }
+
 func GenerateStatImage(
 	price, startProfit, priceG, endProfit, avgPrice, avgProfit float64,
 	count *FragmentCount,
@@ -403,23 +404,22 @@ func GenerateStatImage(
 	}
 
 	drawTextColoredDigits := func(x, y int, text string, baseColor, digitColor color.Color) {
-	currX := x
-	for _, r := range text {
-		c := baseColor
-		if (r >= '0' && r <= '9') || r == '.' || r == '%' {
-			c = digitColor
-		}
+		currX := x
+		for _, r := range text {
+			c := baseColor
+			if (r >= '0' && r <= '9') || r == '.' || r == '%' {
+				c = digitColor
+			}
 
-		drawText(currX, y, string(r), c)
+			drawText(currX, y, string(r), c)
 
-		advance, ok := fontFace.GlyphAdvance(r)
-		if !ok {
-			advance = fontFace.Metrics().Height
+			advance, ok := fontFace.GlyphAdvance(r)
+			if !ok {
+				advance = fontFace.Metrics().Height
+			}
+			currX += advance.Ceil()
 		}
-		currX += advance.Ceil()
 	}
-}
-
 
 	measure := func(text string) int {
 		d := &font.Drawer{Face: fontFace}
@@ -451,7 +451,7 @@ func GenerateStatImage(
 				rightProfit := fmt.Sprintf("Profit: %.2f%%", endProfit)
 
 				drawTextColoredDigits(
-					width/4-measure(leftTitle)/2, 
+					width/4-measure(leftTitle)/2,
 					y+blockHeight/2,
 					leftTitle,
 					textColor,
@@ -459,7 +459,7 @@ func GenerateStatImage(
 				)
 
 				drawTextColoredDigits(
-					width/4-measure(leftTitle)/2, 
+					width/4-measure(leftTitle)/2,
 					y+blockHeight/2+fontSize*1.5,
 					leftProfit,
 					textColor,
@@ -503,7 +503,7 @@ func GenerateStatImage(
 			draw: func(y int) {
 				line1 := fmt.Sprintf("Avg price: %.2f", avgPrice)
 				line2 := fmt.Sprintf("Profit: %.2f%%", avgProfit)
-				
+
 				drawTextColoredDigits(
 					width/2-measure(line1)/2,
 					y+blockHeight/2,
@@ -521,7 +521,6 @@ func GenerateStatImage(
 				)
 			},
 		},
-		
 	}
 
 	// --- РЕНДЕР ---
@@ -568,11 +567,46 @@ func getProfitColor(p float64, good, bad color.Color) color.Color {
 	}
 	return bad
 }
+
 // HandleLook выводит ID чата и ID ветки в консоль
 func HandleLook(c telebot.Context) {
 	chatID := c.Chat().ID
 	threadID := c.Message().ThreadID
-	
+
 	fmt.Printf("[/look] Chat ID: %d | Thread ID: %d\n", chatID, threadID)
 	fmt.Printf("[/look] Chat ID: %d\n[/look] Thread ID: %d\n", chatID, threadID)
+}
+
+// HandlePS возвращает текущий статус бота
+func HandlePS(redisClient *redis.Client, c telebot.Context) string {
+	status := "✅ Бот работает нормально\n\n"
+	collectingStatus, _ := GetValue(redisClient, "process:collecting")
+	status += "• статус: " + collectingStatus + "\n"
+	c.Send(status, &telebot.SendOptions{ThreadID: c.Message().ThreadID})
+	return status
+}
+
+// getProcessStatus возвращает статус процесса из Redis
+func getProcessStatus(redisClient *redis.Client, processName string) string {
+	status, err := GetValue(redisClient, "process:"+processName)
+	if err != nil || status == "" {
+		return "⏳ В ожидании"
+	}
+
+	// Проверяем если это прогресс (формат: running:50%)
+	if len(status) > 8 && status[:8] == "running:" {
+		percentage := status[8:]
+		return "🔄 В процессе: " + percentage
+	}
+
+	switch status {
+	case "running":
+		return "🔄 В процессе"
+	case "idle":
+		return "⏳ В ожидании"
+	case "error":
+		return "❌ Ошибка"
+	default:
+		return "❓ " + status
+	}
 }

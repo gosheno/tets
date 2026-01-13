@@ -8,8 +8,9 @@ import (
 	"gopkg.in/telebot.v3"
 )
 
-// HandleFloorCheck processes /floor and /check commands for SimpleBot
 func HandleFloorCheck(redisClient *redis.Client, c telebot.Context) (string, string) {
+	// Проверяем статус сбора данных
+
 	priceOfchain, _, _ := GetFirstOnSalePrice(redisClient)
 	priceOnchain, _, _ := GetMinPriceFloor(redisClient)
 	price := Min(priceOfchain, priceOnchain)
@@ -17,7 +18,9 @@ func HandleFloorCheck(redisClient *redis.Client, c telebot.Context) (string, str
 	startprofit := (price/1000 - 1.4) / 1.4 * 100
 	endprofit := (price/1000 - priceg) / priceg * 100
 
+	// Запрашиваем среднюю цену (это может запустить сбор данных)
 	avgPrice, _ := GetAveragePrice(redisClient)
+
 	avgProfit := (price/1000 - avgPrice) / avgPrice * 100
 
 	if c != nil {
@@ -40,20 +43,10 @@ func HandleFloorCheck(redisClient *redis.Client, c telebot.Context) (string, str
 				"За неделю: %d\n"+
 				"За месяц: %d\n", count.Day, count.Week, count.Month)
 
-	
 	// Генерируем картинку со статистикой в конце
 	imgPath, err := GenerateStatImage(price, startprofit, priceg, endprofit, avgPrice, avgProfit, count)
 	if err != nil {
 		log.Printf("Ошибка генерации изображения: %v", err)
-	}
-
-	// Отправляем картинку если она создана
-	if err == nil && imgPath != "" && c != nil {
-		photo := &telebot.Photo{File: telebot.FromDisk(imgPath)}
-		_, err := c.Bot().Send(c.Chat(), photo, &telebot.SendOptions{ThreadID: c.Message().ThreadID})
-		if err != nil {
-			log.Printf("Ошибка отправки изображения: %v", err)
-		}
 	}
 
 	return msg, imgPath
@@ -66,7 +59,7 @@ func HandleFloorCheckNoCache(redisClient *redis.Client, c telebot.Context) strin
 	priceg, _, _ := GetMinPriceGreen(redisClient)
 	startprofit := (price/1000 - 1.4) / 1.4 * 100
 	endprofit := (price/1000 - priceg) / priceg * 100
-	
+
 	avgPrice, _ := GetAveragePriceNoCache(redisClient)
 	avgProfit := (price/1000 - avgPrice) / avgPrice * 100
 

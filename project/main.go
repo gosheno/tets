@@ -75,7 +75,10 @@ func main() {
 
 	// Обработка всех текстовых сообщений через chatbot
 	bot.Handle(telebot.OnText, func(c telebot.Context) error {
-		cb.HandleMessage(c)
+		response := cb.HandleMessage(c)
+		if response != "" {
+			c.Send(response)
+		}
 		return nil
 	})
 	cb.RedisClient.FlushAll(botutils.Ctx)
@@ -88,22 +91,31 @@ func main() {
 			adminID := os.Getenv("CHAT_ID")
 			threadid := os.Getenv("THREAD_ID")
 			id := parseChatID(adminID)
-		chat := &telebot.Chat{ID: id}
+			chat := &telebot.Chat{ID: id}
 			thr := parseTreadID(threadid)
-			var mg = "я запустился"
-
-			bot.Send(chat, mg, &telebot.SendOptions{ThreadID: thr})
 			if adminID == "" {
 				log.Println("ADMIN_CHAT_ID не задан, /floor не будет отправлен")
 			} else {
-				_, imgPath := botutils.HandleFloorCheck(cb.RedisClient, nil)
+				textMsg, imgPath := botutils.HandleFloorCheck(cb.RedisClient, nil)
 				if msg != nil {
 					bot.Delete(msg)
 				}
-				photo := &telebot.Photo{File: telebot.FromDisk(imgPath)}
-				msg,  err = bot.Send(chat, photo, &telebot.SendOptions{ThreadID: thr})
-				if err != nil {
-					log.Printf("Ошибка отправки /floor: %v", err)
+
+				// Проверяем есть ли картинка
+				if imgPath != "" {
+					photo := &telebot.Photo{File: telebot.FromDisk(imgPath)}
+					msg, err = bot.Send(chat, photo, &telebot.SendOptions{ThreadID: thr})
+					if err != nil {
+						log.Printf("Ошибка отправки /floor (картинка): %v", err)
+						// Отправляем хотя бы текстовое сообщение
+						bot.Send(chat, textMsg, &telebot.SendOptions{ThreadID: thr})
+					}
+				} else {
+					// Если нет картинки (данные собираются), отправляем текстовое сообщение
+					msg, err = bot.Send(chat, textMsg, &telebot.SendOptions{ThreadID: thr})
+					if err != nil {
+						log.Printf("Ошибка отправки /floor (статус): %v", err)
+					}
 				}
 			}
 			time.Sleep(3 * time.Hour)
