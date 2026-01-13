@@ -87,13 +87,15 @@ func main() {
 		for {
 			adminID := os.Getenv("CHAT_ID")
 			threadid := os.Getenv("THREAD_ID")
-			
+			id := parseChatID(adminID)
+		chat := &telebot.Chat{ID: id}
+			thr := parseTreadID(threadid)
+			var mg = "я запустился"
+
+			bot.Send(chat, mg, &telebot.SendOptions{ThreadID: thr})
 			if adminID == "" {
 				log.Println("ADMIN_CHAT_ID не задан, /floor не будет отправлен")
 			} else {
-				id := parseChatID(adminID)
-				thr := parseTreadID(threadid)
-				chat := &telebot.Chat{ID: id}
 				_, imgPath := botutils.HandleFloorCheck(cb.RedisClient, nil)
 				if msg != nil {
 					bot.Delete(msg)
