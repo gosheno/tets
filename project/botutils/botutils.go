@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	apiqueue "tg-getgems-bot/api"
 	"time"
 
@@ -172,6 +173,60 @@ func GetMinPriceFloor(redisClient *redis.Client) (float64, []byte, error) {
 	// Кэшируем значение на 5 часов
 	fmt.Print("[API] min_price_floor: ", data.Response.FloorPrice, "\n")
 	return data.Response.FloorPrice, bodyBytes, nil
+}
+
+// GetTonPrice возвращает текущую цену TON в USD (через CoinGecko)
+func GetTonPrice() (float64, []byte, error) {
+	url := "https://api.coinpaprika.com/v1/tickers/ton-toncoin"
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return 0, nil, err
+	}
+	req.Header.Add("accept", "application/json")
+
+	var resp *http.Response
+	if apiqueue.Queue != nil {
+		resp, err = apiqueue.Queue.Enqueue(req, apiqueue.Low)
+		if err != nil {
+			return 0, nil, err
+		}
+	} else {
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err = client.Do(req)
+		if err != nil {
+			return 0, nil, err
+		}
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return 0, nil, fmt.Errorf("status %s", resp.Status)
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	// Парсим формат CoinPaprika: {"quotes":{"USD":{"price":1.23}}}
+	type quote struct {
+		Price float64 `json:"price"`
+	}
+	var parsed struct {
+		Quotes map[string]quote `json:"quotes"`
+	}
+
+	if err := json.Unmarshal(bodyBytes, &parsed); err != nil {
+		return 0, bodyBytes, err
+	}
+
+	q, ok := parsed.Quotes["USD"]
+	if !ok {
+		return 0, bodyBytes, fmt.Errorf("USD quote missing")
+	}
+
+	return q.Price, bodyBytes, nil
 }
 
 func GetFirstOnSalePrice(redisClient *redis.Client) (float64, []byte, error) {
@@ -350,10 +405,9 @@ var ttfBytes []byte
 type FragmentCount struct {
 	Day, Week, Month int
 }
-
 func GenerateStatImage(
 	price, startProfit, priceG, endProfit, avgPrice, avgProfit float64,
-	count *FragmentCount,
+	count *FragmentCount, TonPrice float64, startProfitUsd float64,
 ) (string, error) {
 
 	const (
@@ -403,22 +457,60 @@ func GenerateStatImage(
 		d.DrawString(text)
 	}
 
-	drawTextColoredDigits := func(x, y int, text string, baseColor, digitColor color.Color) {
+	// --- рисование текста с подсветкой чисел ---
+	drawTextColoredDigits := func(
+		x, y int,
+		text string,
+		baseColor color.Color,
+		good color.Color,
+		bad color.Color,
+	) {
 		currX := x
-		for _, r := range text {
-			c := baseColor
-			if (r >= '0' && r <= '9') || r == '.' || r == '%' {
-				c = digitColor
+		var buf strings.Builder
+
+		flushNumber := func() {
+			if buf.Len() == 0 {
+				return
 			}
 
-			drawText(currX, y, string(r), c)
+			raw := buf.String()
+			numStr := strings.TrimSuffix(raw, "%")
+			val, err := strconv.ParseFloat(numStr, 64)
 
+			colorToUse := baseColor
+			if err == nil {
+				colorToUse = getProfitColor(val, good, bad)
+			}
+
+			for _, r := range raw {
+				drawText(currX, y, string(r), colorToUse)
+				advance, ok := fontFace.GlyphAdvance(r)
+				if !ok {
+					advance = fontFace.Metrics().Height
+				}
+				currX += advance.Ceil()
+			}
+
+			buf.Reset()
+		}
+
+		for _, r := range text {
+			if (r >= '0' && r <= '9') || r == '.' || r == '-' || r == '%' {
+				buf.WriteRune(r)
+				continue
+			}
+
+			flushNumber()
+
+			drawText(currX, y, string(r), baseColor)
 			advance, ok := fontFace.GlyphAdvance(r)
 			if !ok {
 				advance = fontFace.Metrics().Height
 			}
 			currX += advance.Ceil()
 		}
+
+		flushNumber()
 	}
 
 	measure := func(text string) int {
@@ -438,16 +530,18 @@ func GenerateStatImage(
 			draw: func(y int) {
 				val := fmt.Sprintf("%.2f", price)
 				x := width/2 - measure(val)/2
-				drawTextColoredDigits(x, y+blockHeight/2, val, textColor, textColor)
+				drawTextColoredDigits(x, y+blockHeight/2, val, textColor, profitGoodColor, profitBadColor)
 			},
 		},
 		{
-			title: "Stats(secondary market)",
+			title: "Stats (secondary market)",
 			draw: func(y int) {
-				leftTitle := "Mint 1.4"
-				leftProfit := fmt.Sprintf("Profit: %.2f%%", startProfit)
+				priceusd := 1.4 * TonPrice
 
-				rightTitle := fmt.Sprintf("Actual: %.2f", priceG)
+				leftTitle := fmt.Sprintf("Mint 1.4 (%.2fusd)", priceusd)
+				leftProfit := fmt.Sprintf("Profit: %.2f%% (%.2f%%)", startProfit, startProfitUsd)
+
+				rightTitle := fmt.Sprintf("Actual: %.2f (%.2fusd)", priceG, priceG*TonPrice)
 				rightProfit := fmt.Sprintf("Profit: %.2f%%", endProfit)
 
 				drawTextColoredDigits(
@@ -455,15 +549,17 @@ func GenerateStatImage(
 					y+blockHeight/2,
 					leftTitle,
 					textColor,
-					getProfitColor(startProfit, profitGoodColor, profitBadColor),
+					profitGoodColor,
+					profitBadColor,
 				)
 
 				drawTextColoredDigits(
-					width/4-measure(leftTitle)/2,
-					y+blockHeight/2+fontSize*1.5,
+					width/4-measure(leftProfit)/2,
+					y+blockHeight/2+fontSize*3/2,
 					leftProfit,
 					textColor,
-					getProfitColor(startProfit, profitGoodColor, profitBadColor),
+					profitGoodColor,
+					profitBadColor,
 				)
 
 				drawTextColoredDigits(
@@ -471,15 +567,17 @@ func GenerateStatImage(
 					y+blockHeight/2,
 					rightTitle,
 					textColor,
-					getProfitColor(endProfit, profitGoodColor, profitBadColor),
+					profitGoodColor,
+					profitBadColor,
 				)
 
 				drawTextColoredDigits(
-					3*width/4-measure(rightTitle)/2,
-					y+blockHeight/2+fontSize*1.5,
+					3*width/4-measure(rightProfit)/2,
+					y+blockHeight/2+fontSize*3/2,
 					rightProfit,
 					textColor,
-					getProfitColor(endProfit, profitGoodColor, profitBadColor),
+					profitGoodColor,
+					profitBadColor,
 				)
 			},
 		},
@@ -499,7 +597,7 @@ func GenerateStatImage(
 			},
 		},
 		{
-			title: "Community Stats(owned NFTs)",
+			title: "Community Stats (owned NFTs)",
 			draw: func(y int) {
 				line1 := fmt.Sprintf("Avg price: %.2f", avgPrice)
 				line2 := fmt.Sprintf("Profit: %.2f%%", avgProfit)
@@ -509,15 +607,17 @@ func GenerateStatImage(
 					y+blockHeight/2,
 					line1,
 					textColor,
-					getProfitColor(avgProfit, profitGoodColor, profitBadColor),
+					profitGoodColor,
+					profitBadColor,
 				)
 
 				drawTextColoredDigits(
-					width/2-measure(line1)/2,
-					y+blockHeight/2+fontSize*1.5,
+					width/2-measure(line2)/2,
+					y+blockHeight/2+fontSize*3/2,
 					line2,
 					textColor,
-					getProfitColor(avgProfit, profitGoodColor, profitBadColor),
+					profitGoodColor,
+					profitBadColor,
 				)
 			},
 		},
@@ -535,7 +635,6 @@ func GenerateStatImage(
 			draw.Src,
 		)
 
-		// title
 		drawText(
 			width/2-measure(b.title)/2,
 			y+fontSize,

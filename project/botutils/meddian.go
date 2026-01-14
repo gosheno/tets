@@ -167,6 +167,7 @@ func GetAveragePriceNoCache(redisClient *redis.Client) (float64, bool) {
 
 		sum += lastPrice
 		count++
+		
 		percentage := int((float64(count) / float64(total)) * 100)
 		progressText := fmt.Sprintf("collecting - %d%%", percentage)
 		SetValue(redisClient, "process:collecting", progressText)

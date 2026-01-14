@@ -15,9 +15,10 @@ func HandleFloorCheck(redisClient *redis.Client, c telebot.Context) (string, str
 	priceOnchain, _, _ := GetMinPriceFloor(redisClient)
 	price := Min(priceOfchain, priceOnchain)
 	priceg, _, _ := GetMinPriceGreen(redisClient)
+	priseUsd, _, _ := GetTonPrice()
 	startprofit := (price/1000 - 1.4) / 1.4 * 100
+	startProfitUsd := (price/1000*priseUsd - 1.4*3.125) / (1.4 * 3.125) * 100
 	endprofit := (price/1000 - priceg) / priceg * 100
-
 	// Запрашиваем среднюю цену (это может запустить сбор данных)
 	avgPrice, _ := GetAveragePrice(redisClient)
 
@@ -44,7 +45,7 @@ func HandleFloorCheck(redisClient *redis.Client, c telebot.Context) (string, str
 				"За месяц: %d\n", count.Day, count.Week, count.Month)
 
 	// Генерируем картинку со статистикой в конце
-	imgPath, err := GenerateStatImage(price, startprofit, priceg, endprofit, avgPrice, avgProfit, count)
+	imgPath, err := GenerateStatImage(price, startprofit, priceg, endprofit, avgPrice, avgProfit, count, priseUsd, startProfitUsd)
 	if err != nil {
 		log.Printf("Ошибка генерации изображения: %v", err)
 	}
