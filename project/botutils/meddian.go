@@ -361,6 +361,7 @@ func UpdateCollectionIndex(
 				if indexed == "true" {
 					rds.RPush(ctx, "collection:new_sales", saleData)
 				}
+			
 			}
 
 			// обновляем timestamp

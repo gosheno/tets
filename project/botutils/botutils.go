@@ -714,21 +714,18 @@ func NotifyNewSales(bot *telebot.Bot, redisClient *redis.Client, collection stri
 
 		// --- Отправляем уведомление ---
 		adminID := os.Getenv("CHAT_ID")
-		threadID := parseTreadID(os.Getenv("THREAD_ID"))
 		if adminID == "" {
 			continue
 		}
 		chat := &telebot.Chat{ID: parseChatID(adminID)}
 		msgText := fmt.Sprintf(
-			"💎 Новая покупка в коллекции %s\nNFT: %s — %s\nЦена: %.4f TON\nTimestamp: %s",
-			collection,
-			sale.Address,
+			"💎 Новая покупка — %s\nЦена: %.4f TON\nTime: %s",
 			sale.Name,
 			sale.Price,
 			time.UnixMilli(sale.Timestamp).Format("02 Jan 2006 15:04:05"),
 		)
 
-		if _, err := bot.Send(chat, msgText, &telebot.SendOptions{ThreadID: threadID}); err != nil {
+		if _, err := bot.Send(chat, msgText); err != nil {
 			log.Printf("[Notifier] Ошибка отправки уведомления: %v", err)
 		} else {
 			log.Printf("[Notifier] Отправлено уведомление о покупке NFT %s", sale.Address)
