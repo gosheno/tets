@@ -27,6 +27,10 @@ func (b *SimpleBot) HandleMessage(c telebot.Context) string {
 		botutils.HandleLook(c)
 		return ""
 	}
+	if c.Text() == "/floor" {
+		botutils.HandleFloor(c.Bot(),b.RedisClient, c)
+		return ""
+	}
 	if c.Text() == "/ps" {
 		botutils.HandlePS(b.RedisClient, c)
 		return ""

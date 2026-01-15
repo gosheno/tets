@@ -1,8 +1,10 @@
 package botutils
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -22,6 +24,7 @@ import (
 	"golang.org/x/image/font/basicfont"
 	"golang.org/x/image/font/opentype"
 	"golang.org/x/image/math/fixed"
+	"golang.org/x/sync/singleflight"
 	"gopkg.in/telebot.v3"
 )
 
@@ -61,322 +64,282 @@ type AttrValues struct {
 	MinPriceNano string `json:"minPriceNano"`
 }
 
-func GetMinPrice(redisClient *redis.Client) (float64, []byte, error) {
-	cacheKey := "min_price_reactor"
-	cached, err := GetValue(redisClient, cacheKey)
-	if err == nil && cached != "" {
-		price, err := strconv.ParseFloat(cached, 64)
-		if err == nil {
-			fmt.Println("[Redis] Возврат из кеша min_price_reactor:", price)
-			return price, []byte(fmt.Sprintf("{\"cached\":true,\"price\":%f}", price)), nil
-		}
-	}
+var requestGroup singleflight.Group
 
-	url := "https://api.getgems.io/public-api/v1/collection/attributes/EQC4XEulxb05Le5gF6esMtDWT5XZ6tlzlMBQGNsqffxpdC5U"
+// --- Утилиты ---
+
+// fetchJSON делает HTTP GET и парсит JSON в result
+func fetchJSON(url string, result any) ([]byte, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		log.Println("❌ Ошибка создания запроса:", err)
-		return 0, nil, err
+		return nil, err
 	}
 	req.Header.Add("accept", "application/json")
-	req.Header.Add("Authorization", os.Getenv("GETGEMS_TOKEN"))
+	if token := os.Getenv("GETGEMS_TOKEN"); token != "" {
+		req.Header.Add("Authorization", token)
+	}
+
 	resp, err := apiqueue.Queue.Enqueue(req, apiqueue.Low)
 	if err != nil {
-		return 0, nil, err
+		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return 0, nil, fmt.Errorf("status %s", resp.Status)
-	}
-	bodyBytes, err := io.ReadAll(resp.Body)
+
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return 0, nil, err
+		return nil, err
 	}
-	var data ApiResponse
-	if err := json.Unmarshal(bodyBytes, &data); err != nil {
-		return 0, bodyBytes, err
+
+	if resp.StatusCode != http.StatusOK {
+		return body, fmt.Errorf("status %s", resp.Status)
 	}
-	for _, attr := range data.Response.Attributes {
-		for _, v := range attr.Values {
-			if v.Value == "Reactor" {
-				price, err := strconv.ParseFloat(v.MinPrice, 64)
-				if err != nil {
-					return 0, bodyBytes, err
+
+	if err := json.Unmarshal(body, result); err != nil {
+		return body, err
+	}
+
+	return body, nil
+}
+
+// timeRange возвращает minTime и maxTime в миллисекундах для n дней назад
+func timeRange(days int) (min, max int64) {
+	max = time.Now().UnixMilli()
+	min = max - int64(days)*24*3600*1000
+	return
+}
+
+// minFloat возвращает минимальное из двух float64
+func minFloat(a, b float64) float64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// calcProfit возвращает процент прибыли
+func calcProfit(price, base float64) float64 {
+	return (price - base) / base * 100
+}
+
+// --- API-функции ---
+
+// GetMinPrice возвращает минимальную цену Reactor из коллекции с кэшированием
+func GetMinPrice(redisClient *redis.Client) (float64, error) {
+	cacheKey := "min_price_reactor"
+
+	val, err, _ := requestGroup.Do(cacheKey, func() (interface{}, error) {
+		cached, err := redisClient.Get(Ctx, cacheKey).Result()
+		if err == nil && cached != "" {
+			price, _ := strconv.ParseFloat(cached, 64)
+			log.Printf("[Redis] Возврат из кэша min_price_reactor: %.2f", price)
+			return price, nil
+		}
+
+		type ApiResponse struct {
+			Response struct {
+				Attributes []struct {
+					Values []struct {
+						Value    string `json:"value"`
+						MinPrice string `json:"minPrice"`
+					} `json:"values"`
+				} `json:"attributes"`
+			} `json:"response"`
+		}
+
+		var data ApiResponse
+		url := "https://api.getgems.io/public-api/v1/collection/attributes/EQC4XEulxb05Le5gF6esMtDWT5XZ6tlzlMBQGNsqffxpdC5U"
+		if _, err := fetchJSON(url, &data); err != nil {
+			return 0.0, err
+		}
+
+		for _, attr := range data.Response.Attributes {
+			for _, v := range attr.Values {
+				if v.Value == "Reactor" {
+					price, _ := strconv.ParseFloat(v.MinPrice, 64)
+					redisClient.Set(Ctx, cacheKey, price, time.Hour)
+					log.Printf("[API] min_price_reactor: %.2f", price)
+					return price, nil
 				}
-				// Кэшируем значение на 1 час
-				fmt.Print("[API] min_price_reactor: ", price, "\n")
-				redisClient.Set(Ctx, cacheKey, v.MinPrice, 3600*1_000_000_000) // 1 час в наносекундах
-				return price, bodyBytes, nil
 			}
 		}
+		return 0.0, errors.New("не найден min_price Reactor")
+	})
+
+	if err != nil {
+		return 0, err
 	}
-	print(bodyBytes)
-	return 0, bodyBytes, fmt.Errorf("не найден model.reactor.MinPriceNano")
+	return val.(float64), nil
 }
 
-func GetMinPriceGreen(redisClient *redis.Client) (float64, []byte, error) {
-	fmt.Println("[API] Запрос min_price_green")
-
-	url := "https://api.getgems.io/public-api/v1/collection/stats/EQAnmo8tBH8gSErzWDrdlJiF8kxgfJEynKMIBxL2MkuHvPBc"
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return 0, nil, err
-	}
-	req.Header.Add("accept", "application/json")
-	req.Header.Add("Authorization", os.Getenv("GETGEMS_TOKEN"))
-	resp, err := apiqueue.Queue.Enqueue(req, apiqueue.Low)
-	if err != nil {
-		return 0, nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return 0, nil, fmt.Errorf("status %s", resp.Status)
-	}
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return 0, nil, err
-	}
-	var data ApiResponseGreen
-	if err := json.Unmarshal(bodyBytes, &data); err != nil {
-		return 0, bodyBytes, err
-	}
-
-	// Кэшируем значение на 5 часов
-	fmt.Print("[API] min_price: ", data.Response.FloorPrice, "\n")
-	return data.Response.FloorPrice, bodyBytes, nil
-}
-func GetMinPriceFloor(redisClient *redis.Client) (float64, []byte, error) {
-	url := "https://api.getgems.io/public-api/v1/collection/stats/EQC4XEulxb05Le5gF6esMtDWT5XZ6tlzlMBQGNsqffxpdC5U"
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return 0, nil, err
-	}
-	req.Header.Add("accept", "application/json")
-	req.Header.Add("Authorization", os.Getenv("GETGEMS_TOKEN"))
-	resp, err := apiqueue.Queue.Enqueue(req, apiqueue.Low)
-	if err != nil {
-		return 0, nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return 0, nil, fmt.Errorf("status %s", resp.Status)
-	}
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return 0, nil, err
-	}
-	var data ApiResponseGreen
-	if err := json.Unmarshal(bodyBytes, &data); err != nil {
-		return 0, bodyBytes, err
-	}
-
-	// Кэшируем значение на 5 часов
-	fmt.Print("[API] min_price_floor: ", data.Response.FloorPrice, "\n")
-	return data.Response.FloorPrice, bodyBytes, nil
-}
-
-// GetTonPrice возвращает текущую цену TON в USD (через CoinGecko)
-func GetTonPrice() (float64, []byte, error) {
-	url := "https://api.coinpaprika.com/v1/tickers/ton-toncoin"
-
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return 0, nil, err
-	}
-	req.Header.Add("accept", "application/json")
-
-	var resp *http.Response
-	if apiqueue.Queue != nil {
-		resp, err = apiqueue.Queue.Enqueue(req, apiqueue.Low)
-		if err != nil {
-			return 0, nil, err
+// GetMinPriceGreen возвращает минимальный флор Green с кэшированием
+func GetMinPriceGreen(redisClient *redis.Client) (float64, error) {
+	cacheKey := "min_price_green"
+	val, err, _ := requestGroup.Do(cacheKey, func() (interface{}, error) {
+		cached, _ := redisClient.Get(Ctx, cacheKey).Result()
+		if cached != "" {
+			price, _ := strconv.ParseFloat(cached, 64)
+			log.Printf("[Redis] min_price_green: %.2f", price)
+			return price, nil
 		}
-	} else {
-		client := &http.Client{Timeout: 10 * time.Second}
-		resp, err = client.Do(req)
-		if err != nil {
-			return 0, nil, err
+
+		type ApiResp struct {
+			Response struct {
+				FloorPrice float64 `json:"floorPrice"`
+			} `json:"response"`
 		}
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return 0, nil, fmt.Errorf("status %s", resp.Status)
-	}
-
-	bodyBytes, err := io.ReadAll(resp.Body)
+		var data ApiResp
+		url := "https://api.getgems.io/public-api/v1/collection/stats/EQAnmo8tBH8gSErzWDrdlJiF8kxgfJEynKMIBxL2MkuHvPBc"
+		if _, err := fetchJSON(url, &data); err != nil {
+			return 0.0, err
+		}
+		redisClient.Set(Ctx, cacheKey, data.Response.FloorPrice, 5*time.Hour)
+		log.Printf("[API] min_price_green: %.2f", data.Response.FloorPrice)
+		return data.Response.FloorPrice, nil
+	})
 	if err != nil {
-		return 0, nil, err
+		return 0, err
 	}
-
-	// Парсим формат CoinPaprika: {"quotes":{"USD":{"price":1.23}}}
-	type quote struct {
-		Price float64 `json:"price"`
-	}
-	var parsed struct {
-		Quotes map[string]quote `json:"quotes"`
-	}
-
-	if err := json.Unmarshal(bodyBytes, &parsed); err != nil {
-		return 0, bodyBytes, err
-	}
-
-	q, ok := parsed.Quotes["USD"]
-	if !ok {
-		return 0, bodyBytes, fmt.Errorf("USD quote missing")
-	}
-
-	return q.Price, bodyBytes, nil
+	return val.(float64), nil
 }
 
-func GetFirstOnSalePrice(redisClient *redis.Client) (float64, []byte, error) {
+// GetMinPriceFloor возвращает минимальный флор коллекции с кэшированием
+func GetMinPriceFloor(redisClient *redis.Client) (float64, error) {
+	cacheKey := "min_price_floor"
+	val, err, _ := requestGroup.Do(cacheKey, func() (interface{}, error) {
+		cached, _ := redisClient.Get(Ctx, cacheKey).Result()
+		if cached != "" {
+			price, _ := strconv.ParseFloat(cached, 64)
+			log.Printf("[Redis] min_price_floor: %.2f", price)
+			return price, nil
+		}
+
+		type ApiResp struct {
+			Response struct {
+				FloorPrice float64 `json:"floorPrice"`
+			} `json:"response"`
+		}
+		var data ApiResp
+		url := "https://api.getgems.io/public-api/v1/collection/stats/EQC4XEulxb05Le5gF6esMtDWT5XZ6tlzlMBQGNsqffxpdC5U"
+		if _, err := fetchJSON(url, &data); err != nil {
+			return 0.0, err
+		}
+		redisClient.Set(Ctx, cacheKey, data.Response.FloorPrice, 5*time.Hour)
+		log.Printf("[API] min_price_floor: %.2f", data.Response.FloorPrice)
+		return data.Response.FloorPrice, nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return val.(float64), nil
+}
+
+// GetTonPrice возвращает текущую цену TON в USD
+func GetTonPrice(redisClient *redis.Client) (float64, error) {
+	cacheKey := "ton_usd"
+	val, err, _ := requestGroup.Do(cacheKey, func() (interface{}, error) {
+	cached, _ := redisClient.Get(Ctx, cacheKey).Result()
+		if cached != "" {
+			price, _ := strconv.ParseFloat(cached, 64)
+			return price, nil
+		}
+		type quote struct {
+			Price float64 `json:"price"`
+		}
+		var parsed struct {
+			Quotes map[string]quote `json:"quotes"`
+		}
+		url := "https://api.coinpaprika.com/v1/tickers/ton-toncoin"
+		body, err := fetchJSON(url, &parsed)
+		if err != nil {
+			return 0.0, err
+		}
+		q, ok := parsed.Quotes["USD"]
+		if !ok {
+			return 0.0, fmt.Errorf("USD quote missing: %s", string(body))
+		}
+		redisClient.Set(Ctx, cacheKey, q.Price, 5*time.Minute)
+		return q.Price, nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return val.(float64), nil
+}
+
+// GetFirstOnSalePrice возвращает цену первой NFT на продаже
+func GetFirstOnSalePrice(redisClient *redis.Client) (float64, error) {
 	cacheKey := "first_price_collection"
-	cached, err := GetValue(redisClient, cacheKey)
-	if err == nil && cached != "" {
-		price, err := strconv.ParseFloat(cached, 64)
-		if err == nil {
-			fmt.Println("[Redis] Возврат из кеша first_price_collection:", price)
-			return price, []byte(fmt.Sprintf("{\"cached\":true,\"price\":%f}", price)), nil
+	val, err, _ := requestGroup.Do(cacheKey, func() (interface{}, error) {
+		cached, _ := redisClient.Get(Ctx, cacheKey).Result()
+		if cached != "" {
+			price, _ := strconv.ParseFloat(cached, 64)
+			log.Printf("[Redis] first_price_collection: %.2f", price)
+			return price, nil
 		}
-	}
 
-	url := "https://api.getgems.io/public-api/v1/nfts/offchain/on-sale/EQC4XEulxb05Le5gF6esMtDWT5XZ6tlzlMBQGNsqffxpdC5U"
-	req, err := http.NewRequest("GET", url, nil)
+		type OnSaleResponse struct {
+			Response struct {
+				Items []struct {
+					Sale struct {
+						FullPrice string `json:"fullPrice"`
+					} `json:"sale"`
+				} `json:"items"`
+			} `json:"response"`
+		}
+		var data OnSaleResponse
+		url := "https://api.getgems.io/public-api/v1/nfts/offchain/on-sale/EQC4XEulxb05Le5gF6esMtDWT5XZ6tlzlMBQGNsqffxpdC5U"
+		if _, err := fetchJSON(url, &data); err != nil {
+			return 0.0, err
+		}
+		if len(data.Response.Items) == 0 {
+			return 0.0, errors.New("нет NFT в продаже")
+		}
+		price, _ := strconv.ParseFloat(data.Response.Items[0].Sale.FullPrice, 64)
+		priceFinal := price / 1e9
+		redisClient.Set(Ctx, cacheKey, priceFinal, time.Hour)
+		log.Printf("[API] first_price_collection: %.2f", priceFinal)
+		return priceFinal, nil
+	})
 	if err != nil {
-		log.Println("❌ Ошибка создания запроса:", err)
-		return 0, nil, err
+		return 0, err
 	}
-	req.Header.Add("accept", "application/json")
-	req.Header.Add("Authorization", os.Getenv("GETGEMS_TOKEN"))
-
-	resp, err := apiqueue.Queue.Enqueue(req, apiqueue.Low)
-	if err != nil {
-		return 0, nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return 0, nil, fmt.Errorf("status %s", resp.Status)
-	}
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return 0, nil, err
-	}
-
-	// структура ответа (упрощённая)
-	type OnSaleResponse struct {
-		Response struct {
-			Items []struct {
-				Address string `json:"address"`
-				Name    string `json:"name"`
-				Sale    struct {
-					Type           string `json:"type"`
-					FullPrice      string `json:"fullPrice"`
-					Currency       string `json:"currency"`
-					MarketplaceFee string `json:"marketplaceFee"`
-				} `json:"sale"`
-			} `json:"items"`
-		} `json:"response"`
-	}
-
-	var data OnSaleResponse
-	if err := json.Unmarshal(bodyBytes, &data); err != nil {
-		return 0, bodyBytes, err
-	}
-
-	if len(data.Response.Items) == 0 {
-		return 0, bodyBytes, fmt.Errorf("нет NFT в продаже")
-	}
-	priceStr := data.Response.Items[0].Sale.FullPrice
-	price, err := strconv.ParseFloat(priceStr, 64)
-	pricefinal := price / 1e9
-	if err != nil {
-		return 0, bodyBytes, err
-	}
-	if err != nil {
-		return 0, bodyBytes, err
-	}
-
-	fmt.Println("[API] first_price_collection:", pricefinal)
-	redisClient.Set(Ctx, cacheKey, pricefinal, 3600*1_000_000_000)
-
-	return pricefinal, bodyBytes, nil
+	return val.(float64), nil
 }
 
-// FragmentCount содержит количество купленных фрагментов за разные периоды
-
-// GetCount возвращает количество купленных фрагментов за день, неделю и месяц
+// GetCount возвращает количество купленных фрагментов за день/неделю/месяц
 func GetCount(redisClient *redis.Client) (*FragmentCount, error) {
-	count := &FragmentCount{}
-	now := time.Now().Unix() * 1000             // конвертируем в миллисекунды
-	dayAgo := (now - (24 * 3600 * 1000))        // 1 день назад
-	weekAgo := (now - (7 * 24 * 3600 * 1000))   // 7 дней назад
-	monthAgo := (now - (30 * 24 * 3600 * 1000)) // 30 дней назад
+	now := time.Now().UTC()
+	dayKey := "collection:sales:day:" + now.Format("20060102")
 
-	// Адрес коллекции зеленых кусочков
-	collectionAddress := "EQAnmo8tBH8gSErzWDrdlJiF8kxgfJEynKMIBxL2MkuHvPBc"
+	year, week := now.ISOWeek()
+	weekKey := fmt.Sprintf("collection:sales:week:%d%02d", year, week)
 
-	// Получаем продажи за месяц
-	monthURL := fmt.Sprintf("https://api.getgems.io/public-api/v1/collection/history/%s?minTime=%d&maxTime=%d&types=sold&limit=100",
-		collectionAddress, monthAgo, now)
-	monthCount, err := fetchHistoryCount(monthURL)
-	if err != nil {
-		log.Println("❌ Ошибка получения истории месяца:", err)
-		return nil, err
+	monthKey := "collection:sales:month:" + now.Format("200601")
+
+	get := func(key string) int {
+		v, err := redisClient.Get(Ctx, key).Int()
+		if err != nil {
+			return 0
+		}
+		return v
 	}
-	count.Month = monthCount
 
-	// Получаем продажи за неделю
-	weekURL := fmt.Sprintf("https://api.getgems.io/public-api/v1/collection/history/%s?minTime=%d&maxTime=%d&types=sold&limit=100",
-		collectionAddress, weekAgo, now)
-	weekCount, err := fetchHistoryCount(weekURL)
-	if err != nil {
-		log.Println("❌ Ошибка получения истории недели:", err)
-		return nil, err
+	count := &FragmentCount{
+		Day:   get(dayKey),
+		Week:  get(weekKey),
+		Month: get(monthKey),
 	}
-	count.Week = weekCount
 
-	// Получаем продажи за день
-	dayURL := fmt.Sprintf("https://api.getgems.io/public-api/v1/collection/history/%s?minTime=%d&maxTime=%d&types=sold&limit=100",
-		collectionAddress, dayAgo, now)
-	dayCount, err := fetchHistoryCount(dayURL)
-	if err != nil {
-		log.Println("❌ Ошибка получения истории дня:", err)
-		return nil, err
-	}
-	count.Day = dayCount
+	log.Printf(
+		"[Redis] fragment_count: день=%d, неделя=%d, месяц=%d",
+		count.Day, count.Week, count.Month,
+	)
 
-	fmt.Printf("[API] fragment_count: день=%d, неделя=%d, месяц=%d\n", count.Day, count.Week, count.Month)
 	return count, nil
 }
 
-// fetchHistoryCount получает и подсчитывает количество продаж из истории коллекции
+// fetchHistoryCount подсчитывает количество продаж в истории
 func fetchHistoryCount(url string) (int, error) {
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		log.Println("❌ Ошибка создания запроса:", err)
-		return 0, err
-	}
-	req.Header.Add("accept", "application/json")
-	req.Header.Add("Authorization", os.Getenv("GETGEMS_TOKEN"))
-
-	resp, err := apiqueue.Queue.Enqueue(req, apiqueue.Low)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("status %s", resp.Status)
-	}
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return 0, err
-	}
-
-	// Структура для парсинга ответа API истории коллекции
 	type HistoryResponse struct {
 		Success  bool `json:"success"`
 		Response struct {
@@ -385,15 +348,15 @@ func fetchHistoryCount(url string) (int, error) {
 			} `json:"items"`
 		} `json:"response"`
 	}
-
 	var data HistoryResponse
-	if err := json.Unmarshal(bodyBytes, &data); err != nil {
-		log.Println("❌ Ошибка парсинга JSON:", err)
+	body, err := fetchJSON(url, &data)
+	if err != nil {
 		return 0, err
 	}
-
-	// Подсчитываем количество продаж (sold события)
 	count := len(data.Response.Items)
+	if count == 0 {
+		log.Printf("[API] fetchHistoryCount пусто: %s", string(body))
+	}
 	return count, nil
 }
 
@@ -707,5 +670,68 @@ func getProcessStatus(redisClient *redis.Client, processName string) string {
 		return "❌ Ошибка"
 	default:
 		return "❓ " + status
+	}
+}
+
+func parseChatID(s string) int64 {
+	var id int64
+	fmt.Sscan(s, &id)
+	return id
+}
+
+func parseTreadID(s string) int {
+	var id int
+	fmt.Sscan(s, &id)
+	return id
+}
+
+func NotifyNewSales(bot *telebot.Bot, redisClient *redis.Client, collection string) {
+	ctx := context.Background()
+	for {
+		// Проверяем очередь новых продаж
+		saleJSON, err := redisClient.LPop(ctx, "collection:new_sales").Result()
+		if err != nil {
+			if errors.Is(err, redis.Nil) {
+				time.Sleep(10 * time.Second) // очередь пустая
+				continue
+			}
+			log.Printf("[Notifier] Redis error: %v", err)
+			time.Sleep(10 * time.Second)
+			continue
+		}
+
+		var sale struct {
+			Address   string  `json:"address"`
+			Name      string  `json:"name"`
+			Price     float64 `json:"price"`
+			Timestamp int64   `json:"timestamp"`
+		}
+
+		if err := json.Unmarshal([]byte(saleJSON), &sale); err != nil {
+			log.Printf("[Notifier] Ошибка парсинга saleJSON: %v", err)
+			continue
+		}
+
+		// --- Отправляем уведомление ---
+		adminID := os.Getenv("CHAT_ID")
+		threadID := parseTreadID(os.Getenv("THREAD_ID"))
+		if adminID == "" {
+			continue
+		}
+		chat := &telebot.Chat{ID: parseChatID(adminID)}
+		msgText := fmt.Sprintf(
+			"💎 Новая покупка в коллекции %s\nNFT: %s — %s\nЦена: %.4f TON\nTimestamp: %s",
+			collection,
+			sale.Address,
+			sale.Name,
+			sale.Price,
+			time.UnixMilli(sale.Timestamp).Format("02 Jan 2006 15:04:05"),
+		)
+
+		if _, err := bot.Send(chat, msgText, &telebot.SendOptions{ThreadID: threadID}); err != nil {
+			log.Printf("[Notifier] Ошибка отправки уведомления: %v", err)
+		} else {
+			log.Printf("[Notifier] Отправлено уведомление о покупке NFT %s", sale.Address)
+		}
 	}
 }
