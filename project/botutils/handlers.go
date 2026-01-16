@@ -162,7 +162,7 @@ func HandleMeSingleLine(redisClient *redis.Client) func(c telebot.Context) error
 
 		pnl := (currentPrice/1000 - avgPrice) / avgPrice * 100
 		text := fmt.Sprintf(
-			"Фрагментов: %d\nСредняя цена покупки: %.2f TON\nfloor Heart Locket: %.2f TON\nВаш PNL: %.2f%%",
+			"Фрагментов: %d\nСредняя цена покупки: %.2f TON\nfloor Heart Locket: %.2f TON\nPNL: %.2f%%",
 			count, avgPrice, currentPrice, pnl,
 		)
 		c.Reply(text)
