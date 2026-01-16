@@ -78,8 +78,6 @@ func OnTextGlobalHandler(bot *telebot.Bot, redisClient *redis.Client, cb *Simple
 			}
 		}
 
-		// --- Неизвестная команда ---
-		c.Reply("Неизвестная команда. Попробуйте /help")
 		return nil
 	}
 }
