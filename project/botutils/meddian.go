@@ -246,7 +246,16 @@ func UpdateCollectionIndex(
 	processKey := "process:collection_indexing"
 	SetValue(rds, processKey, "running")
 	defer SetValue(rds, processKey, "idle")
+	primaryKey := "collection:" + collectionAddress + ":primary_index_done"
 
+	isFirst := false
+	exists, _ := rds.Exists(Ctx, primaryKey).Result()
+	if exists == 0 {
+		isFirst = true
+		log.Println("[Indexer] Первая индексация")
+	}else{
+		log.Println("[Indexer] Последующая индексация")
+	}
 	ctx := Ctx
 
 	// --- lastTS ---
@@ -368,11 +377,35 @@ func UpdateCollectionIndex(
 				if _, err := pipe2.Exec(ctx); err != nil {
 					return err
 				}
+				
+				if !isFirst {
+					saleEvent := struct {
+						Address   string  `json:"address"`
+						Name      string  `json:"name"`
+						Price     float64 `json:"price"`
+						Timestamp int64   `json:"timestamp"`
+					}{
+						Address:   addr,
+						Name:      item.Name,
+						Price:     price,
+						Timestamp: item.Timestamp,
+					}
 
+					saleJSON, err := json.Marshal(saleEvent)
+					if err != nil {
+						log.Printf("[Indexer] error marshal sale event: %v", err)
+					} else {
+						if err := rds.RPush(ctx, "collection:new_sales", saleJSON).Err(); err != nil {
+							log.Printf("[Indexer] error push sale to queue: %v", err)
+						}
+					}
+				}
+				
 				log.Printf(
 					"[Indexer][sold] NFT %s — %s, old=%.4f new=%.4f",
 					addr, item.Name, oldPrice, price,
 				)
+
 			}
 		}
 
@@ -387,6 +420,9 @@ func UpdateCollectionIndex(
 
 		// сохраняем в Redis
 		rds.Set(ctx, "collection:cursor:"+collectionAddress, cursor, 0)
+		if isFirst {
+					rds.Set(ctx, primaryKey, "true", 0)
+				}
 		page++
 	}
 

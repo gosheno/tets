@@ -745,7 +745,7 @@ func NotifyNewSales(bot *telebot.Bot, redisClient *redis.Client, collection stri
 		}
 		chat := &telebot.Chat{ID: parseChatID(adminID)}
 		msgText := fmt.Sprintf(
-			"💎 Новая покупка — %s\nЦена: %.4f TON\nTime: %s",
+			"💎 Новая покупка — %s\nЦена: %.4f TON\nВремя: %s",
 			sale.Name,
 			sale.Price,
 			time.UnixMilli(sale.Timestamp).Format("02 Jan 2006 15:04:05"),
