@@ -109,39 +109,42 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Инициализация Redis-клиента
+	// Redis
 	redisAddr := os.Getenv("REDIS_ADDR")
 	if redisAddr == "" {
 		redisAddr = "localhost:6379"
 	}
 	redisPassword := os.Getenv("REDIS_PASSWORD")
 	redisDB := 0
-	cb := chatbot.NewSimpleBot("MyBot", botutils.NewRedisClient(redisAddr, redisPassword, redisDB))
+	redisClient := botutils.NewRedisClient(redisAddr, redisPassword, redisDB)
 
-	// Обработка всех текстовых сообщений через chatbot
-	bot.Handle(telebot.OnText, func(c telebot.Context) error {
-		response := cb.HandleMessage(c)
-		if response != "" {
-			c.Send(response)
-		}
-		return nil
-	})
+	cb := chatbot.NewSimpleBot("MyBot", redisClient)
 
+	// --- Инициализация команд ---
+	chatbot.InitCommands(cb)
+
+	// --- Глобальный текстовый обработчик ---
+	bot.Handle(telebot.OnText, chatbot.OnTextGlobalHandler(bot, cb.RedisClient, cb))
+
+	// Очистка Redis для теста (необязательно в продакшене)
 	cb.RedisClient.FlushAll(botutils.Ctx)
-		apiqueue.InitPriorityQueue(100, 100, 1200*time.Millisecond)
-		collection := os.Getenv("COLLECTION_ADDRESS")
+
+	// Инициализация очереди API
+	apiqueue.InitPriorityQueue(100, 100, 1200*time.Millisecond)
+
+	collection := os.Getenv("COLLECTION_ADDRESS")
 	if collection == "" {
 		log.Println("⚠️ COLLECTION_ADDRESS не задан — индексатор не запущен")
 	} else {
 		go startCollectionIndexer(cb.RedisClient, collection)
 	}
-	go botutils.NotifyNewSales(bot, cb.RedisClient, os.Getenv("COLLECTION_ADDRESS"))
 
-	// Запуск /floor раз в час
+	go botutils.NotifyNewSales(bot, cb.RedisClient, collection)
+
+	// Запуск /floor раз в 3 часа
 	go func() {
 		var msg *telebot.Message
 		for {
-			// Проверяем завершение первичной индексации
 			indexed, _ := cb.RedisClient.Get(botutils.Ctx, "collection:"+collection+":indexed").Result()
 			if indexed != "true" {
 				log.Println("[Floor] Первичная индексация ещё не завершена, ждём 30 секунд...")
@@ -149,7 +152,6 @@ func main() {
 				continue
 			}
 
-			// Индексация завершена → можно формировать /floor
 			textMsg, imgPath := botutils.FloorCheck(cb.RedisClient)
 
 			if msg != nil {
@@ -157,35 +159,40 @@ func main() {
 			}
 
 			adminID := os.Getenv("CHAT_ID")
-			threadid := os.Getenv("THREAD_ID")
-			id := parseChatID(adminID)
-			chat := &telebot.Chat{ID: id}
-			thr := parseTreadID(threadid)
+			threadID := os.Getenv("THREAD_ID")
+			chat := &telebot.Chat{ID: parseChatID(adminID)}
+			thread := parseThreadID(threadID)
 
 			if imgPath != "" {
 				photo := &telebot.Photo{File: telebot.FromDisk(imgPath)}
-				msg, err = bot.Send(chat, photo, &telebot.SendOptions{ThreadID: thr})
+				msg, err = bot.Send(chat, photo, &telebot.SendOptions{ThreadID: thread})
 				if err != nil {
 					log.Printf("Ошибка отправки /floor (картинка): %v", err)
-					bot.Send(chat, textMsg, &telebot.SendOptions{ThreadID: thr})
+					bot.Send(chat, textMsg, &telebot.SendOptions{ThreadID: thread})
 				}
 			} else {
-				msg, err = bot.Send(chat, textMsg, &telebot.SendOptions{ThreadID: thr})
+				msg, err = bot.Send(chat, textMsg, &telebot.SendOptions{ThreadID: thread})
 				if err != nil {
-					log.Printf("Ошибка отправки /floor (статус): %v", err)
+					log.Printf("Ошибка отправки /floor (текст): %v", err)
 				}
 			}
 
-			// Ждём интервал 3 часа
 			time.Sleep(3 * time.Hour)
 		}
 	}()
+
 	log.Println("Бот запущен")
 	bot.Start()
 }
 
 func parseChatID(s string) int64 {
 	var id int64
+	fmt.Sscan(s, &id)
+	return id
+}
+
+func parseThreadID(s string) int {
+	var id int
 	fmt.Sscan(s, &id)
 	return id
 }

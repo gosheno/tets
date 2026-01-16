@@ -187,7 +187,6 @@ func extractPrice(item CollectionHistoryItem) (float64, bool) {
 
 func GetCollectionHistory(
 	collectionAddress string,
-	minTime int64,
 	cursor string,
 ) (*CollectionHistoryResponse, error) {
 
@@ -196,26 +195,22 @@ func GetCollectionHistory(
 	q := url.Values{}
 	q.Set("limit", "100")
 	q.Set("reverse", "true")
-	if minTime > 0 {
-		q.Set("minTime", strconv.FormatInt(minTime, 10))
-	}
-	if cursor != "" {
+	if  cursor != "" {
 		q.Set("after", cursor)
 	}
+
 	q.Add("types", "mint")
 	q.Add("types", "sold")
 
-	// ⚡ фильтруем только нужные события
 	reqURL := baseURL + "?" + q.Encode()
 	req, err := http.NewRequest("GET", reqURL, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Add("accept", "application/json")
-	apiKey := os.Getenv("GETGEMS_TOKEN")
-	req.Header.Add("Authorization", apiKey)
 
-	// используем очередь
+	req.Header.Add("accept", "application/json")
+	req.Header.Add("Authorization", os.Getenv("GETGEMS_TOKEN"))
+
 	resp, err := apiqueue.Queue.Enqueue(req, apiqueue.Low)
 	if err != nil {
 		return nil, err
@@ -224,7 +219,10 @@ func GetCollectionHistory(
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("collection history error %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf(
+			"collection history error %d: %s",
+			resp.StatusCode, string(body),
+		)
 	}
 
 	var result CollectionHistoryResponse
@@ -239,6 +237,7 @@ func GetCollectionHistory(
 	return &result, nil
 }
 
+
 func UpdateCollectionIndex(
 	rds *redis.Client,
 	collectionAddress string,
@@ -246,59 +245,82 @@ func UpdateCollectionIndex(
 
 	processKey := "process:collection_indexing"
 	SetValue(rds, processKey, "running")
-	defer func() {
-		SetValue(rds, processKey, "idle")
-	}()
+	defer SetValue(rds, processKey, "idle")
 
 	ctx := Ctx
 
-	// --- загрузка последнего timestamp ---
+	// --- lastTS ---
 	lastTS, err := rds.Get(ctx, "collection:last_ts:"+collectionAddress).Int64()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
-			lastTS = 1
+			lastTS = 0
 			log.Printf("[Indexer] Нет lastTS в Redis, начнем с 0")
 		} else {
 			return err
 		}
-	} else {
-		log.Printf("[Indexer] Загружен lastTS из Redis: %d", lastTS)
 	}
 
-	cursor := ""
-	page := 1
-	prevcursor := ""
+	cursor, _ := rds.Get(ctx, "collection:cursor:"+collectionAddress).Result()
+	var cursorPtr *string
+	if cursor != "" {
+		cursorPtr = &cursor
+	}
+
 	maxTS := lastTS
+	page := 1
+
 	for {
-		if cursor == prevcursor && prevcursor != "" {
-			log.Printf("[Indexer] Cursor не меняется, выходим из цикла")
-			break
-		}
-		prevcursor = cursor
-		log.Printf("[Indexer] Загружаем страницу %d, cursor=%s, minTime=%d", page, cursor, lastTS)
-		resp, err := GetCollectionHistory(collectionAddress, lastTS+1, cursor)
+		log.Printf(
+			"[Indexer] Загружаем страницу %d, cursor=%v",
+			page, cursorPtr,
+		)
+
+		resp, err := GetCollectionHistory(collectionAddress, cursor)
 		if err != nil {
-			log.Printf("❌ [Indexer] Ошибка GetCollectionHistory: %v", err)
 			return err
 		}
+
 		if len(resp.Response.Items) == 0 {
-			log.Printf("[Indexer] Пустая страница, выходим")
+			log.Printf("[Indexer] Пустая страница")
 			break
 		}
 
 		for _, item := range resp.Response.Items {
 			addr := item.Address
 
+			// --- обновляем maxTS ---
+			if item.Timestamp > maxTS {
+				maxTS = item.Timestamp
+			}
+
 			switch item.TypeData.Type {
+
 			case "mint":
-				log.Printf("[Indexer][mint] NFT %s — %s, timestamp=%d", addr, item.Name, item.Timestamp)
-				// можно сохранять список NFT, если нужно
-				// rds.SAdd(ctx, "collection:fragments:"+collectionAddress, addr)
+				priceKey := fmt.Sprintf("nft:last_price:%s:%s", collectionAddress, addr)
+
+				// ⚠️ ставим цену ТОЛЬКО если её нет
+				ok, err := rds.SetNX(ctx, priceKey, 1.4, 0).Result()
+				if err != nil {
+					return err
+				}
+				if ok {
+					log.Printf("[Indexer][mint] NFT %s — %s, price=1.4", addr, item.Name)
+				} else {
+					log.Printf("[Indexer][mint] NFT %s — %s, цена уже есть", addr, item.Name)
+				}
+				sumKey := "collection:sum:" + collectionAddress
+				countKey := "collection:count:" + collectionAddress
+
+				pipe := rds.TxPipeline()
+				pipe.IncrByFloat(ctx, sumKey, 1.4)
+				pipe.Incr(ctx, countKey)
+				if _, err := pipe.Exec(ctx); err != nil {
+					return err
+				}
 
 			case "sold":
 				price, ok := extractPrice(item)
 				if !ok {
-					log.Printf("[Indexer][sold] NFT %s — %s, не удалось извлечь цену", addr, item.Name)
 					continue
 				}
 
@@ -311,6 +333,10 @@ func UpdateCollectionIndex(
 					} else {
 						return err
 					}
+				}
+
+				if oldPrice == price {
+					continue
 				}
 
 				if err := rds.Set(ctx, priceKey, price, 0).Err(); err != nil {
@@ -334,6 +360,7 @@ func UpdateCollectionIndex(
 				day := dayKey(item.Timestamp)
 				week := weekKey(item.Timestamp)
 				month := monthKey(item.Timestamp)
+
 				pipe2 := rds.TxPipeline()
 				pipe2.Incr(ctx, "collection:sales:day:"+day)
 				pipe2.Incr(ctx, "collection:sales:week:"+week)
@@ -342,51 +369,162 @@ func UpdateCollectionIndex(
 					return err
 				}
 
-				log.Printf("[Indexer][sold] NFT %s — %s, oldPrice=%.4f, newPrice=%.4f", addr, item.Name, oldPrice, price)
-
-				saleData, _ := json.Marshal(struct {
-					Address   string  `json:"address"`
-					Name      string  `json:"name"`
-					Price     float64 `json:"price"`
-					Timestamp int64   `json:"timestamp"`
-				}{
-					Address:   addr,
-					Name:      item.Name,
-					Price:     price,
-					Timestamp: item.Timestamp,
-				})
-
-				// сохраняем, только если первичная индексация завершена
-				indexed, _ := rds.Get(ctx, "collection:"+collectionAddress+":indexed").Result()
-				if indexed == "true" {
-					rds.RPush(ctx, "collection:new_sales", saleData)
-				}
-			
-			}
-
-			// обновляем timestamp
-			if item.Timestamp > maxTS {
-				maxTS = item.Timestamp
+				log.Printf(
+					"[Indexer][sold] NFT %s — %s, old=%.4f new=%.4f",
+					addr, item.Name, oldPrice, price,
+				)
 			}
 		}
-		lastTS = maxTS
+
+		// --- cursor ---
 		if resp.Response.Cursor == "" {
-			log.Printf("[Indexer] Достигнут конец истории, последняя страница %d", page)
+			log.Printf("[Indexer] Конец истории")
 			break
 		}
+
+		// обновляем cursor для следующей страницы
 		cursor = resp.Response.Cursor
+
+		// сохраняем в Redis
+		rds.Set(ctx, "collection:cursor:"+collectionAddress, cursor, 0)
 		page++
-		
 	}
 
-	// сохраняем последний timestamp
-	if err := rds.Set(ctx, "collection:last_ts:"+collectionAddress, lastTS, 0).Err(); err != nil {
+	// --- сохраняем lastTS ---
+	if err := rds.Set(ctx, "collection:last_ts:"+collectionAddress, maxTS, 0).Err(); err != nil {
 		return err
 	}
-	// ✅ Помечаем, что первичная индексация завершена
+
 	rds.Set(ctx, "collection:"+collectionAddress+":indexed", "true", 0)
 
-	log.Printf("[Indexer] Индексация завершена, сохранен lastTS=%d", lastTS)
+	log.Printf("[Indexer] Индексация завершена, lastTS=%d", maxTS)
 
 	return nil
+}
+
+
+type OwnerNftsResponse struct {
+	Success bool `json:"success"`
+	Response struct {
+		Cursor *string `json:"cursor"`
+		Items  []struct {
+			Address           string `json:"address"`
+			CollectionAddress string `json:"collectionAddress"`
+			Name              string `json:"name"`
+		} `json:"items"`
+	} `json:"response"`
+}
+
+func GetOwnerAvgBuyPrice(
+	rds *redis.Client,
+	ownerAddress string,
+) (avg float64, count int, err error) {
+
+	ctx := Ctx
+	var sum float64
+	var total int
+
+	collectionAddress := os.Getenv("COLLECTION_ADDRESS")
+	cursor := ""
+
+	log.Printf(
+		"[OwnerAvg] owner=%s collection=%s",
+		ownerAddress,
+		collectionAddress,
+	)
+
+	for {
+		u := fmt.Sprintf(
+			"https://api.getgems.io/public-api/v1/nfts/collection/%s/owner/%s?limit=100",
+			collectionAddress,
+			ownerAddress,
+		)
+		if cursor != "" {
+			u += "&after=" + url.QueryEscape(cursor)
+		}
+
+		log.Printf("[OwnerAvg] request: %s", u)
+
+		req, err := http.NewRequest("GET", u, nil)
+		if err != nil {
+			return 0, 0, err
+		}
+		req.Header.Add("accept", "application/json")
+		req.Header.Add("Authorization", os.Getenv("GETGEMS_TOKEN"))
+
+		resp, err := apiqueue.Queue.Enqueue(req, apiqueue.Low)
+		if err != nil {
+			return 0, 0, err
+		}
+
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		log.Printf("[OwnerAvg] status=%d body=%s", resp.StatusCode, string(body))
+
+		if resp.StatusCode != http.StatusOK {
+			return 0, 0, fmt.Errorf("getgems error %d", resp.StatusCode)
+		}
+
+		var data OwnerNftsResponse
+		if err := json.Unmarshal(body, &data); err != nil {
+			return 0, 0, err
+		}
+
+		log.Printf(
+			"[OwnerAvg] received %d NFTs",
+			len(data.Response.Items),
+		)
+
+		for _, nft := range data.Response.Items {
+			log.Printf(
+				"[OwnerAvg] nft=%s name=%s",
+				nft.Address,
+				nft.Name,
+			)
+
+			priceKey := fmt.Sprintf("nft:last_price:%s:%s", collectionAddress, nft.Address,)
+			price, err := rds.Get(ctx, priceKey).Float64()
+			
+			if err != nil {
+				if errors.Is(err, redis.Nil) {
+					log.Printf(
+						"[OwnerAvg] no price in redis for nft=%s",
+						nft.Address,
+					)
+					continue
+				}
+				return 0, 0, err
+			}
+
+			log.Printf(
+				"[OwnerAvg] matched nft=%s price=%.4f",
+				nft.Address,
+				price,
+			)
+
+			sum += price
+			total++
+		}
+
+		if data.Response.Cursor == nil || *data.Response.Cursor == "" {
+			break
+		}
+		cursor = *data.Response.Cursor
+	}
+
+	if total == 0 {
+		log.Printf("[OwnerAvg] NO NFT FOUND")
+		return 0, 0, nil
+	}
+
+	avg = sum / float64(total)
+
+	log.Printf(
+		"[OwnerAvg] DONE count=%d avg=%.4f",
+		total,
+		avg,
+	)
+
+	return avg, total, nil
 }

@@ -158,3 +158,21 @@ func HandleCount(redisClient *redis.Client, c telebot.Context) error {
 	return c.Send(msg)
 }
 
+var waitingForAddress = make(map[int64]bool)
+
+func HandleMe(redisClient *redis.Client) func(c telebot.Context) error {
+	return func(c telebot.Context) error {
+		userID := c.Sender().ID
+		waitingForAddress[userID] = true
+
+		// Шаг 1 — просим адрес
+		msg, err := c.Bot().Reply(c.Message(),"🔑 Пришлите TON-адрес кошелька")
+		if err != nil {
+			return err
+		}
+
+		// Сохраняем ID сообщения, чтобы удалить потом
+		c.Set("me_msg_id", msg.ID)
+		return nil
+	}
+}

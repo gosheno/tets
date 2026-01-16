@@ -365,6 +365,7 @@ func fetchHistoryCount(url string) (int, error) {
 //go:embed Alkia.ttf
 var ttfBytes []byte
 
+
 type FragmentCount struct {
 	Day, Week, Month int
 }
@@ -380,7 +381,7 @@ func GenerateStatImage(
 		numBlocks = 4
 		fontSize  = 32
 	)
-
+	
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
 
 	// --- цвета ---
@@ -409,7 +410,25 @@ func GenerateStatImage(
 	if err != nil {
 		return "", err
 	}
+	smallFontSize := float64(fontSize) * 0.55
 
+	smallFontFace, err := opentype.NewFace(ttfFont, &opentype.FaceOptions{
+		Size:    smallFontSize,
+		DPI:     72,
+		Hinting: font.HintingNone,
+	})
+	if err != nil {
+		return "", err
+	}
+	drawTextSmall := func(x, y int, text string, c color.Color) {
+		d := &font.Drawer{
+			Dst:  img,
+			Src:  image.NewUniform(c),
+			Face: smallFontFace,
+			Dot:  fixed.P(x, y),
+		}
+		d.DrawString(text)
+	}
 	drawText := func(x, y int, text string, c color.Color) {
 		d := &font.Drawer{
 			Dst:  img,
@@ -499,13 +518,13 @@ func GenerateStatImage(
 		{
 			title: "Stats (secondary market)",
 			draw: func(y int) {
-				priceusd := 1.4 * TonPrice
+				priceusd := 1.4*3.125
 
-				leftTitle := fmt.Sprintf("Mint 1.4 (%.2fusd)", priceusd)
-				leftProfit := fmt.Sprintf("Profit: %.2f%% (%.2f%%)", startProfit, startProfitUsd)
+				leftTitle  := fmt.Sprintf("Mint: 1.4      (%.2f$)   ", priceusd)
+				leftProfit := fmt.Sprintf("PnL: %.2f%% (%.2f%%)", startProfit, startProfitUsd)
 
-				rightTitle := fmt.Sprintf("Actual: %.2f (%.2fusd)", priceG, priceG*TonPrice)
-				rightProfit := fmt.Sprintf("Profit: %.2f%%", endProfit)
+				rightTitle := fmt.Sprintf("Actual: %.2f (%.2f$)", priceG, priceG*TonPrice)
+				rightProfit := fmt.Sprintf("PnL: %.2f%%", endProfit)
 
 				drawTextColoredDigits(
 					width/4-measure(leftTitle)/2,
@@ -563,8 +582,8 @@ func GenerateStatImage(
 			title: "Community Stats (owned NFTs)",
 			draw: func(y int) {
 				line1 := fmt.Sprintf("Avg price: %.2f", avgPrice)
-				line2 := fmt.Sprintf("Profit: %.2f%%", avgProfit)
-
+				line2 := fmt.Sprintf("PnL: %.2f%%", avgProfit)
+				subLine := "Current total community profit from the sale voting" // ← твой текст
 				drawTextColoredDigits(
 					width/2-measure(line1)/2,
 					y+blockHeight/2,
@@ -573,7 +592,6 @@ func GenerateStatImage(
 					profitGoodColor,
 					profitBadColor,
 				)
-
 				drawTextColoredDigits(
 					width/2-measure(line2)/2,
 					y+blockHeight/2+fontSize*3/2,
@@ -581,6 +599,12 @@ func GenerateStatImage(
 					textColor,
 					profitGoodColor,
 					profitBadColor,
+				)
+				drawTextSmall(
+					width/2-measure(subLine)/2,
+					y+blockHeight/2+fontSize*3/2+int(fontSize),
+					subLine,
+					color.RGBA{90, 90, 90, 255},
 				)
 			},
 		},
@@ -631,21 +655,23 @@ func getProfitColor(p float64, good, bad color.Color) color.Color {
 }
 
 // HandleLook выводит ID чата и ID ветки в консоль
-func HandleLook(c telebot.Context) {
+func HandleLook(c telebot.Context) error  {
 	chatID := c.Chat().ID
 	threadID := c.Message().ThreadID
 
 	fmt.Printf("[/look] Chat ID: %d | Thread ID: %d\n", chatID, threadID)
 	fmt.Printf("[/look] Chat ID: %d\n[/look] Thread ID: %d\n", chatID, threadID)
+	return nil
 }
 
 // HandlePS возвращает текущий статус бота
-func HandlePS(redisClient *redis.Client, c telebot.Context) string {
+func HandlePS(redisClient *redis.Client, c telebot.Context) error {
 	status := "✅ Бот работает нормально\n\n"
 	collectingStatus, _ := GetValue(redisClient, "process:collecting")
 	status += "• статус: " + collectingStatus + "\n"
 	c.Send(status, &telebot.SendOptions{ThreadID: c.Message().ThreadID})
-	return status
+	return c.Send(status, &telebot.SendOptions{ThreadID: c.Message().ThreadID})
+	
 }
 
 // getProcessStatus возвращает статус процесса из Redis
