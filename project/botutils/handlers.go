@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -124,6 +125,49 @@ func HandleFloor(bot *telebot.Bot, redisClient *redis.Client, c telebot.Context)
     }
 
     return nil
+}
+// --- HandleMeSingleLine обрабатывает команду /me с адресом сразу ---
+func HandleMeSingleLine(redisClient *redis.Client) func(c telebot.Context) error {
+	return func(c telebot.Context) error {
+		args := strings.Fields(c.Text()) // разделяем команду и аргументы
+		if len(args) < 2 {
+			c.Reply("❌ Пожалуйста, укажите TON-адрес: /address <TON-address>")
+			return nil
+		}
+
+		ownerAddress := strings.TrimSpace(args[1])
+		if len(ownerAddress) < 20 {
+			c.Reply("❌ Неверный адрес")
+			return nil
+		}
+
+		// Получаем данные
+		avgPrice, count, err := GetOwnerAvgBuyPrice(redisClient, ownerAddress)
+		if err != nil {
+			log.Println("❌ /address error:", err)
+			c.Reply("Ошибка при получении данных")
+			return nil
+		}
+
+		if count == 0 {
+			c.Reply("У вас нет NFT из этой коллекции")
+			return nil
+		}
+
+		currentPrice, err := GetMinPrice(redisClient)
+		if err != nil {
+			c.Reply("Не удалось получить текущую цену флора")
+			return nil
+		}
+
+		pnl := (currentPrice/1000 - avgPrice) / avgPrice * 100
+		text := fmt.Sprintf(
+			"Фрагментов: %d\nСредняя цена покупки: %.2f TON\nfloor Heart Locket: %.2f TON\nВаш PNL: %.2f%%",
+			count, avgPrice, currentPrice, pnl,
+		)
+		c.Reply(text)
+		return nil
+	}
 }
 
 
