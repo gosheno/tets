@@ -379,7 +379,7 @@ func UpdateCollectionIndex(
 					return err
 				}
 				
-				
+				if !isFirst {
 					saleEvent := struct {
 						Address   string  `json:"address"`
 						Name      string  `json:"name"`
@@ -402,8 +402,7 @@ func UpdateCollectionIndex(
 							log.Printf("[Indexer] error push sale to queue: %v", err)
 						}
 					}
-				
-				
+				}
 				log.Printf(
 					"[Indexer][sold] NFT %s — %s, old=%.4f new=%.4f",
 					addr, item.Name, oldPrice, price,
