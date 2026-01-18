@@ -139,6 +139,7 @@ type TypeData struct {
 	RejectFromGlobalTop  bool   `json:"rejectFromGlobalTop"`
 	Currency             string `json:"currency"`   // "TON"
 }
+
 func dayKey(ts int64) string {
 	t := time.UnixMilli(ts).UTC()
 	return t.Format("20060102")
@@ -378,16 +379,18 @@ func UpdateCollectionIndex(
 					return err
 				}
 				
-				if !isFirst {
+				
 					saleEvent := struct {
 						Address   string  `json:"address"`
 						Name      string  `json:"name"`
 						Price     float64 `json:"price"`
+						NewOwner  string  `json:"newowner"`
 						Timestamp int64   `json:"timestamp"`
 					}{
 						Address:   addr,
 						Name:      item.Name,
 						Price:     price,
+						NewOwner: item.TypeData.NewOwner,
 						Timestamp: item.Timestamp,
 					}
 
@@ -399,7 +402,7 @@ func UpdateCollectionIndex(
 							log.Printf("[Indexer] error push sale to queue: %v", err)
 						}
 					}
-				}
+				
 				
 				log.Printf(
 					"[Indexer][sold] NFT %s — %s, old=%.4f new=%.4f",

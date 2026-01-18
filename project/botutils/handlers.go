@@ -130,7 +130,7 @@ func HandleFloor(bot *telebot.Bot, redisClient *redis.Client, c telebot.Context)
 func HandleMeSingleLine(redisClient *redis.Client) func(c telebot.Context) error {
 	return func(c telebot.Context) error {
 		args := strings.Fields(c.Text()) // разделяем команду и аргументы
-		if len(args) < 2 {
+		if len(args) != 2 {
 			c.Reply("❌ Пожалуйста, укажите TON-адрес: /address <TON-address>")
 			return nil
 		}
@@ -154,16 +154,19 @@ func HandleMeSingleLine(redisClient *redis.Client) func(c telebot.Context) error
 			return nil
 		}
 
-		currentPrice, err := GetMinPrice(redisClient)
+		priceOfchain, _ := GetFirstOnSalePrice(redisClient)
+        priceOnchain, _:= GetMinPriceFloor(redisClient)
+        price := Min(priceOfchain, priceOnchain)
+
 		if err != nil {
 			c.Reply("Не удалось получить текущую цену флора")
 			return nil
 		}
 
-		pnl := (currentPrice/1000 - avgPrice) / avgPrice * 100
+		pnl := (price/1000 - avgPrice) / avgPrice * 100
 		text := fmt.Sprintf(
 			"Фрагментов: %d\nСредняя цена покупки: %.2f TON\nfloor Heart Locket: %.2f TON\nPNL: %.2f%%",
-			count, avgPrice, currentPrice, pnl,
+			count, avgPrice, price, pnl,
 		)
 		c.Reply(text)
 		return nil

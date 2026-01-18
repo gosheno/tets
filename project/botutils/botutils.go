@@ -730,6 +730,7 @@ func NotifyNewSales(bot *telebot.Bot, redisClient *redis.Client, collection stri
 			Address   string  `json:"address"`
 			Name      string  `json:"name"`
 			Price     float64 `json:"price"`
+			NewOwner  string  `json:"newowner"`
 			Timestamp int64   `json:"timestamp"`
 		}
 
@@ -744,14 +745,31 @@ func NotifyNewSales(bot *telebot.Bot, redisClient *redis.Client, collection stri
 			continue
 		}
 		chat := &telebot.Chat{ID: parseChatID(adminID)}
-		msgText := fmt.Sprintf(
-			"💎 Новая покупка — %s\nЦена: %.4f TON\nВремя: %s",
+
+		avg, count, err := GetOwnerAvgBuyPrice(redisClient, sale.NewOwner)
+		ownerLink := fmt.Sprintf(
+			"[ %s ](https://getgems.io/user/%s)",
+			sale.NewOwner,
+			sale.NewOwner,
+		)
+		nftlink := fmt.Sprintf(
+			"[ %s ](https://getgems.io/collection/EQAnmo8tBH8gSErzWDrdlJiF8kxgfJEynKMIBxL2MkuHvPBc/%s)",
 			sale.Name,
-			sale.Price,
-			time.UnixMilli(sale.Timestamp).Format("02 Jan 2006 15:04:05"),
+			sale.Address,
 		)
 
-		if _, err := bot.Send(chat, msgText); err != nil {
+		tmp := fmt.Sprintf("-----\nВладелец: %s\nКолличество фрагментов: %d\nCредняя цена: %.4f\n------", ownerLink, count, avg)
+		msgText := fmt.Sprintf(
+			"💎 Новая покупка — %s\n-----\nЦена: %.4f TON\nВремя: %s\n%s",
+			nftlink,
+			sale.Price,
+			time.UnixMilli(sale.Timestamp).Format("02 Jan 2006 15:04:05"),
+			tmp,
+		)
+		// Создаем кнопку с ссылкой
+		if _, err := bot.Send(chat, msgText, &telebot.SendOptions{
+			ParseMode: telebot.ModeMarkdown,
+			DisableWebPagePreview: true, }); err != nil {
 			log.Printf("[Notifier] Ошибка отправки уведомления: %v", err)
 		} else {
 			log.Printf("[Notifier] Отправлено уведомление о покупке NFT %s", sale.Address)
