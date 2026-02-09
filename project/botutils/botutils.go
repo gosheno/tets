@@ -741,10 +741,12 @@ func NotifyNewSales(bot *telebot.Bot, redisClient *redis.Client, collection stri
 
 		// --- Отправляем уведомление ---
 		adminID := os.Getenv("CHAT_ID")
+		threadID:= os.Getenv("DEALS_THREAD")
 		if adminID == "" {
 			continue
 		}
 		chat := &telebot.Chat{ID: parseChatID(adminID)}
+		Thread:= parseTreadID(threadID)
 
 		avg, count, err := GetOwnerAvgBuyPrice(redisClient, sale.NewOwner)
 		ownerLink := fmt.Sprintf(
@@ -768,6 +770,7 @@ func NotifyNewSales(bot *telebot.Bot, redisClient *redis.Client, collection stri
 		)
 		// Создаем кнопку с ссылкой
 		if _, err := bot.Send(chat, msgText, &telebot.SendOptions{
+			ThreadID: Thread,
 			ParseMode: telebot.ModeMarkdown,
 			DisableWebPagePreview: true, }); err != nil {
 			log.Printf("[Notifier] Ошибка отправки уведомления: %v", err)
