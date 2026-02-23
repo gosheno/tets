@@ -738,7 +738,19 @@ func NotifyNewSales(bot *telebot.Bot, redisClient *redis.Client, collection stri
 			log.Printf("[Notifier] Ошибка парсинга saleJSON: %v", err)
 			continue
 		}
-
+		saleTime := time.UnixMilli(sale.Timestamp)
+		now := time.Now()
+		
+		// Создаем "сегодня" в полночь
+		today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		// Создаем "завтра" в полночь
+		tomorrow := today.AddDate(0, 0, 1)
+		
+		// Проверяем, что продажа была сегодня
+		if saleTime.Before(today) || saleTime.After(tomorrow) {
+			log.Printf("[Notifier] Пропущена старая продажа от %v", saleTime.Format("2006-01-02"))
+			continue // Пропускаем, если не сегодня
+		}
 		// --- Отправляем уведомление ---
 		adminID := os.Getenv("CHAT_ID")
 		threadID:= os.Getenv("DEALS_THREAD")

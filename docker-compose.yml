@@ -17,6 +17,8 @@ services:
   redis:
     image: redis:7.2-alpine
     container_name: redis
+    mem_limit: 4g
+    memswap_limit: 4g
+    restart: always
     ports:
       - "6379:6379"
-    restart: unless-stopped
